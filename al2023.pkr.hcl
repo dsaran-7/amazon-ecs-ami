@@ -239,6 +239,42 @@ build {
     only   = ["amazon-ebs.al2023gpu"]
   }
 
+  ### Dynamic NVIDIA driver *version* selection (LTS 580 + staged PB 595, swapped at boot).
+  ### Runs after the native LTS install above; stages the PB set + boot selector on top of it.
+  provisioner "shell" {
+    inline_shebang = "/bin/sh -ex"
+    inline         = ["mkdir -p /tmp/nvidia-select"]
+    only           = ["amazon-ebs.al2023gpu"]
+  }
+
+  provisioner "file" {
+    sources = [
+      "scripts/al2023/gpu/stage-nvidia-pb.sh",
+      "scripts/al2023/gpu/nvidia-driver-select.sh",
+      "scripts/al2023/gpu/kmod-load-condition.sh",
+      "scripts/al2023/gpu/nvidia-driver-select.service",
+      "scripts/al2023/gpu/10-nvidia-driver-select.conf",
+      "scripts/al2023/gpu/10-nvidia-driver-select-ltsonly.conf",
+      "scripts/al2023/gpu/gen-device-lists.py",
+      "scripts/al2023/gpu/pb-required.devices",
+      "scripts/al2023/gpu/lts-fallback.devices",
+      "scripts/al2023/gpu/kmod-nvidia-open-prebuilt.spec"
+    ]
+    destination = "/tmp/nvidia-select/"
+    only        = ["amazon-ebs.al2023gpu"]
+  }
+
+  provisioner "shell" {
+    environment_vars = [
+      "AMI_TYPE=${source.name}",
+      "NVIDIA_DRIVER_VERSION_FILE=/tmp/NVIDIA_DRIVER_VERSION",
+      "NVIDIA_DRIVER_PB_VERSION=${var.nvidia_driver_version_al2023_pb}",
+      "NVIDIA_SELECT_SRC=/tmp/nvidia-select"
+    ]
+    script = "scripts/al2023/gpu/stage-nvidia-pb.sh"
+    only   = ["amazon-ebs.al2023gpu"]
+  }
+
   provisioner "shell" {
     inline_shebang = "/bin/sh -ex"
     inline = [

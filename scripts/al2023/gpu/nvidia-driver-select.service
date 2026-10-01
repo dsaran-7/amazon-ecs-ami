@@ -1,0 +1,26 @@
+# /etc/systemd/system/nvidia-driver-select.service (POC M4)
+# Ordering rationale:
+#  - DefaultDependencies=yes => After=sysinit.target basic.target (udev coldplug done, local fs mounted).
+#  - After=cloud-init.service: cloud-config write_files/bootcmd can drop the optional override file; dkms.service
+#    (Before=network-pre.target) has already finished, so its autoinstall can't race the swap; network bring-up
+#    is not delayed by a swap (unlike Before=dkms.service, which would sit in front of network-pre.target).
+#  - Before= every consumer of the driver: the archive loader, persistenced/fabricmanager/mps/clocks/powerd/gridd,
+#    nvidia-cdi-refresh, dcgm, docker (nvidia runtime hooks read host libs), ecs (ecs-init NVML discovery) and
+#    cloud-final (user-data scripts may use the GPU).
+[Unit]
+Description=Select NVIDIA driver branch for attached GPUs (offline RPM swap, POC M4)
+After=cloud-init.service
+Before=nvidia-kmod-load.service nvidia-persistenced.service nvidia-fabricmanager.service nvidia-mps.service
+Before=set-nvidia-clocks.service nvidia-powerd.service nvidia-gridd.service nvidia-topologyd.service
+Before=nvidia-cdi-refresh.service nvidia-dcgm.service docker.service ecs.service cloud-final.service
+ConditionPathExists=/etc/ecs/nvidia-driver-select/branches
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/nvidia-driver-select/nvidia-driver-select
+TimeoutStartSec=900
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target
