@@ -1,0 +1,5 @@
+# PCI device IDs (vendor 10de) that the LTS branch drives in measured tests although NVIDIA does not list
+# them in its supported-gpus.json. Reviewed list. For these devices nvidia-driver-select accepts an
+# NVIDIA_DRIVER_BRANCH=lts override, and falls back to LTS if the PB swap fails, logging an
+# "UNQUALIFIED configuration" warning in both cases. PB stays the default.
+2c3a  # NVIDIA RTX PRO 4500 Blackwell Server Edition (EC2 G7); 580.178.04 measured working 2026-09-29

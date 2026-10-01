@@ -1,0 +1,12 @@
+# POC measurement only: records uptime at the first successful nvidia-smi after driver selection/loading.
+[Unit]
+Description=POC time-to-first-nvidia-smi probe
+After=nvidia-driver-select.service nvidia-kmod-load.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/poc-gpu-ready
+
+[Install]
+WantedBy=multi-user.target

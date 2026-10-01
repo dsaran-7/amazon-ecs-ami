@@ -1,0 +1,4 @@
+# PCI device IDs (vendor 10de) that REQUIRE the PB branch because the LTS branch does not support them.
+# Reviewed list (policy R3). gen-device-lists.py fails the build if an entry is not open-capable and
+# non-legacy in the PB version's supported-gpus.json, or if the LTS version already supports it.
+2c3a  # NVIDIA RTX PRO 4500 Blackwell Server Edition (EC2 G7)

@@ -265,6 +265,12 @@ variable "nvidia_driver_major_al2023" {
   default     = "580"
 }
 
+variable "nvidia_driver_version_al2023_pb" {
+  type        = string
+  description = "Full Production Branch (PB) NVIDIA driver version staged for boot-time selection on PB-required GPUs (e.g. G7)."
+  default     = "595.91.07"
+}
+
 variable "dcgm_version_al2023" {
   type        = string
   description = "DCGM major version for AL2023 GPU AMIs. Used to install the datacenter-gpu-manager-4-core package."

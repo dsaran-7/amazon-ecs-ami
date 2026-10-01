@@ -1,0 +1,29 @@
+flowchart TD
+    START(["nvidia-driver-select.service<br/>(oneshot, After=cloud-init.service)"]) --> DEV["Read attached GPU PCI IDs<br/>lspci -n -d 10de: (offline)"]
+    DEV --> OVR{"Customer override set?<br/>/etc/ecs/nvidia-driver-select.override"}
+    OVR -->|"set + valid for all GPUs"| SEL
+    OVR -->|"set but invalid<br/>(e.g. PB on P3 / G6f)"| REJECT["Reject override, log,<br/>fall back to auto"]
+    OVR -->|"not set"| AUTO["Auto policy: LTS-first"]
+    REJECT --> AUTO
+    AUTO --> PBCHK{"Any GPU in<br/>pb-required list?<br/>(today: 2c3a = G7)"}
+    PBCHK -->|"yes"| SELPB["selected = 595 (open)"]
+    PBCHK -->|"no"| SELLTS["selected = 580<br/>(flavor by existing PCI rules)"]
+    SELPB --> SEL
+    SELLTS --> SEL
+    SEL{"Installed branch<br/>== selected?"}
+    SEL -->|"yes"| NOOP["No-op: verify versionlock, exit<br/>(~0.17 s)"]
+    SEL -->|"no — swap needed (~19 s, offline)"| S1["1. Unload stale nvidia .ko<br/>(loaded by udev coldplug)"]
+    S1 --> S2["2. Purge old DKMS regs + .ko<br/>(no dkms / no dracut)"]
+    S2 --> S3["3. Install selected branch from<br/>local repo, unshare --net<br/>(native RPM scriptlets run)"]
+    S3 --> S4["4. Rewrite versionlock to selected<br/>NEVRAs (incl. nvidia-imex*, nscq*)"]
+    S4 --> S5["5. depmod + modprobe"]
+    NOOP --> DONE(["Driver ready →<br/>persistenced, mps, docker, ecs.service"])
+    S5 --> DONE
+
+    style NOOP fill:#c8e6c9,stroke:#2e7d32
+    style S1 fill:#ffe0b2,stroke:#e65100
+    style S2 fill:#ffe0b2,stroke:#e65100
+    style S3 fill:#ffe0b2,stroke:#e65100
+    style S4 fill:#ffe0b2,stroke:#e65100
+    style S5 fill:#ffe0b2,stroke:#e65100
+    style REJECT fill:#ffcdd2,stroke:#c62828

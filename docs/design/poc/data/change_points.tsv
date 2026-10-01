@@ -1,0 +1,34 @@
+location(file:line @2e46ed3)	single-version assumption today	change needed for multi-version	source
+NVIDIA_DRIVER_VERSION:15	one key nvidia_driver_version_al2023	per-branch keys (lts/pb) and possibly a separate G6f GRID pin	w4 table; repo
+variables.pkr.hcl:262-266	one pinned major nvidia_driver_major_al2023=580	two majors (EKS: nvidia_driver_lts_version / nvidia_driver_pb_version)	w4; EKS variables-default.pkrvars.hcl:18-19
+al2023.pkr.hcl:214-231	one NVIDIA_DRIVER_VERSION file, one install script pass	pass both versions; per-tree build step	repo
+scripts/check-update-security.sh:144-152	reads one pinned major	loop over majors	repo
+scripts/check-update-security.sh:161-163,257-263	INSTALLED read by dnf repoquery --installed on released AMI on non-GPU c5.large	extracted/justdb-at-boot tree is invisible on non-GPU host -> exit 1 -> check-update.sh (set -euo pipefail, L109) aborts whole InitiateRelease (AL2 + AL2023 too); compare against git-tracked versions or a baked manifest	w4 C39 + verifier
+scripts/check-update-security.sh:271-303	GRID mandatory, 3-partition intersection per major	per-branch; GRID optional for PB (cn-north-1 lacks 595.58.03); separate G6f pin gate	w4; w2 C26
+scripts/check-update-security.sh:305-312	emits one 'true nvidia:<v>' token	per-branch tokens	repo
+scripts/check-update.sh:20-79,109-114	parses nvidia: tokens (last wins), seds single key	per-branch parsing/sed	repo
+.github/workflows/initiaterelease.yml:52-55	single pass	OK once scripts are per-branch	w4
+scripts/al2023/gpu/install-nvidia-driver.sh:56-61	one NVIDIA_DRIVER_FULL_VERSION	loop per tree/branch	repo
+scripts/al2023/gpu/install-nvidia-driver.sh:78-98	proprietary via dnf install kmod-nvidia-latest-dkms + %post compile + rename; module-version nvidia (L81)	explicit version arg; rpm2cpio (no %post compile); skip for 595 (no consumer)	w4; w2 C32
+scripts/al2023/gpu/install-nvidia-driver.sh:101-108	open via dnf %post; rm -rf /usr/src/nvidia* (L107) deletes every version's source	scoped cleanup; keep exactly one kmod RPM registered (nvidia-kmod-common Requires nvidia-kmod = 3:V)	w4 C06/C41
+scripts/al2023/gpu/install-nvidia-driver.sh:111-166	GRID via nvidia-installer --dkms (installs untracked runfile userspace + gridd/topologyd) then rename	make -C kernel-open + harvest .ko + copy only gridd/unit/template (EKS); no GRID for PB	w3 C40; w4 C42
+scripts/al2023/gpu/install-nvidia-driver.sh:122-126	GRID key prefix grep on version (latest/ prefix now holds 595.91.07)	exact key match; never use latest/	w2 verifier; w4
+scripts/al2023/gpu/install-nvidia-driver.sh:178-188	dnf userspace, exact '= 3:V' web -> one branch per rpmdb	LTS native; PB extracted tree / offline repo / separate AMI	w1 C11/C35
+scripts/al2023/gpu/install-nvidia-driver.sh:192	versionlock globs match rpmdb; gives 0 protection to unpacked or justdb'd packages; misses nvidia-imex/libnvidia-nscq	write lock/excludes at boot after registration, selected branch only; add imex/nscq	w1 C41-C43
+scripts/al2023/gpu/install-nvidia-driver.sh:17,244	/etc/dkms/nvidia.conf MAKE -j override (redundant)	drop	w4 C40
+dkms framework.conf post_transaction (dkms 3.4.1)	dracut --regenerate-all --force on every dkms install/remove (~10 per build; 1 at first boot)	/etc/dkms/framework.conf.d override post_transaction=""	w4 C02/C08
+install-nvidia-driver.sh:34 + dkms.service	dkms autoinstall every boot installs newest registered version per name, unordered, unlocked	single registration per name, /etc/dkms/no-autoinstall, or ordering	w4 C10/C22
+scripts/al2023/gpu/kmod-util:65-77	module-version = dkms status | head -n 1	version argument; error on ambiguity	w4 C18
+scripts/al2023/gpu/kmod-util:80-100	load = ldtarball archives[0]; not idempotent (dies 8 on 2nd boot)	version arg; skip ldtarball if added; uninstall conflicting pkgs; loaded-version check	w4 C09/C19/C21
+scripts/al2023/gpu/kmod-util:103-136	remove/archive/build pick first version	version argument	w4
+scripts/al2023/gpu/kmod-util:165-174	CLI takes COMMAND NAME	accept NAME VERSION	w4
+scripts/al2023/gpu/nvidia-kmod-load.sh:11-62	hardware -> flavor only; lspci -n -mm positional $4:$7 parse (pciutils>=3.8 shifts fields)	(hardware[, instance type, override]) -> (branch, flavor); robust PCI parse (sysfs)	w4 C07 + verifier
+scripts/al2023/gpu/nvidia-kmod-load.service:1-11	Before=fabricmanager,persistenced,ecs; no After=; no input	order after override surface; Before cdi-refresh, dcgm, gridd, dkms, mps; sentinel	w4 C28/C29
+scripts/al2023/gpu/nvidia-mps.service:4-7; set-nvidia-clocks.service:2-6	ConditionPathExists on one userspace; After kmod-load / persistenced	After= the switch/setup unit	w4
+scripts/al2023/gpu/install-dcgm.sh:15-24	one DCGM; lock only applied if dcgm-init present (not today)	verify DCGM 4.x vs both branches	w4 C04/C05
+al2023gpu.pkr.hcl:3-10	no driver tag	add driver-branch/version tags	w4
+generate-release-notes.sh:19,45	single --al2023-gpu-nvidia-ver	list both branches	w4 verifier
+README.md:74-107	documents single driver and lock list	document both branches, override, placement attribute	w4
+MACIS ami-tests/archived_kmods_test.go (internal)	3 fixed archive names; al2023gpu tested only on g4dn/g5; no nvidia-kmod-load is-failed check	per-version expectations; g7 (PB) coverage; reboot test	w4 C34 + verifier
+MadisonGithubUtils ssm-publish-value.jq (internal)	no driver field	optional field (or new SSM namespace if separate AMI)	w4 C34
+ecs-agent agent_capability_unix.go:115-127	reports loaded version (ecs.capability.gpu-driver-version)	none (document for placement)	w4 C26

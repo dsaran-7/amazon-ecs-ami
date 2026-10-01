@@ -1,0 +1,22 @@
+flowchart TB
+    subgraph BUILD["Build the AMI (once)"]
+        direction LR
+        A["Install driver 580<br/>(the default)"]
+        B["Stage driver 595<br/>(ready, not installed)"]
+        A --> AMI["One GPU AMI"]
+        B --> AMI
+    end
+
+    AMI --> BOOT
+
+    subgraph BOOT["Boot on an instance"]
+        direction TB
+        Q{"Which GPU?"}
+        Q -->|"G7 (needs 595)"| SW["Switch to 595"]
+        Q -->|"everything else"| KEEP["Use 580"]
+        SW --> RUN["Run GPU workloads"]
+        KEEP --> RUN
+    end
+
+    style B fill:#c8e6c9,stroke:#2e7d32
+    style SW fill:#ffe0b2,stroke:#e65100

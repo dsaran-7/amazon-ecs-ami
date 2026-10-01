@@ -1,0 +1,16 @@
+family,gpu,arch,pci_device_id(INFERRED mapping by product name),r580_open,r580_proprietary,r595_open,r595_proprietary,grid_required,grid19_r580,grid20_r595,aws_min_public_driver,first_listed_in_r580_json,ecs_today_flavor(nvidia-kmod-load.sh),eks_607e8be_choice,synthesis_recommendation(INFERRED),notes
+G3,Tesla M60,Maxwell,0x13F2,no,yes,no(legacy 580.xx),no(legacy),no,no (GRID 17+ unsupported on G3),no,none stated,580.65.06,580 proprietary,580 proprietary,580 proprietary (dead end; R580 EOL Jun-2028),legacy in every 590+ JSON; CUDA capped at 12.x
+P3,Tesla V100-SXM2-16GB,Volta,0x1DB1,no,yes,no(legacy),no(legacy),no,n/a,n/a,none stated,580.65.06,580 proprietary,580 proprietary,580 proprietary (dead end),ECS allowlist tuple 1db1:1212
+P3dn,Tesla V100-SXM2-32GB,Volta,0x1DB5,no,yes,no(legacy),no(legacy),no,n/a,n/a,none stated,580.65.06,580 proprietary,580 proprietary,580 proprietary (dead end),ECS allowlist tuple 1db5:1249
+G4dn,T4,Turing,0x1EB8,yes,yes,yes,yes,no,optional,optional,none stated,580.65.06,580 open,580 proprietary + NVreg_EnableGpuFirmware=0,580 open (reconcile EKS GSP-off rule),EKS forces proprietary+GSP off since a943086 (2024-08)
+G5,A10G,Ampere,0x2237,yes,yes,yes,yes,no,optional (13.1+),optional,470+,580.65.06,580 open,580 proprietary + GSP off,580 open (reconcile EKS GSP-off rule),
+G6 / Gr6,L4,Ada,0x27B8 (bare-metal subsys 16CA/16EE),yes,yes,yes,yes,no,optional (17.1+),optional,525+,580.65.06,580 open,580 open,580 open,
+G6f / Gr6f,L4 vGPU (27b8:1733 L4-3Q / 1735 L4-6Q / 1737 L4-12Q),Ada,0x27B8,n/a,n/a,n/a,n/a,YES (Tesla driver not supported),AWS doc: 18.4 to 19.5 (AMI ships 19.6 = 580.178.04),NO (20.x guest incompatible with vGPU 19 host),GRID only,580.65.06,580 grid (19.6),580 grid (19.6),580 GRID 19.x only; decide 19.5 pin vs 19.6,32 L4 vGPU profiles exist; allowlist covers 3
+G6e,L40S,Ada,0x26B9,yes,yes,yes,yes,no,optional (17.4+),optional,535+,580.65.06,580 open,580 open,580 open,
+G7,RTX PRO 4500 Blackwell Server Edition (10de:21f4),Blackwell GB203,0x2C3A,NOT LISTED (listed once in desktop 580.142 then withdrawn),no (Blackwell open-only),yes (from 595.58.03),no,no,not documented,not documented,595 or later,absent in all 12 repo 580.x,580 open (unqualified),595 open,595 open,only family needing PB; actual 580 behaviour on G7 untested
+G7e,RTX PRO 6000 Blackwell Server Edition,Blackwell GB202,0x2BB5,yes,no,yes,no,no,optional (19.1+),optional,575+,580.65.06,580 open,580 open,580 open,
+P4d / P4de,A100 40GB / 80GB,Ampere,0x20B0 / 0x20B2,yes,yes,yes,yes,no,n/a,n/a,none stated,580.65.06,580 open,580 open,580 open,
+P5,H100,Hopper,0x2330,yes,yes,yes,yes,no,n/a,n/a,530+,580.65.06,580 open,580 open,580 open,Hopper subrev-3 VBIOS<96.00.68.00 known issue in both 580.178.04 and 595.91.07
+P5e / P5en,H200,Hopper,0x2335,yes,yes,yes,yes,no,n/a,n/a,550+,580.65.06,580 open,580 open,580 open,
+P6-B200,B200,Blackwell GB100,0x2901 (INFERRED; 0x2909 only in 595.58.03+),yes,no,yes,no,no,n/a,n/a,570+,580.65.06,580 open,580 open,580 open,
+P6-B300,B300 SXM6 AC,Blackwell Ultra,0x3182,yes (from 580.82.07),no,yes,no,no,n/a,n/a,580+ (effective floor 580.82.07),580.82.07,580 open,580 open,580 open,

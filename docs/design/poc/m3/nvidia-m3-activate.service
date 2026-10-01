@@ -1,0 +1,14 @@
+[Unit]
+Description=NVIDIA driver version tree activation (M3 POC)
+DefaultDependencies=no
+After=local-fs.target systemd-udev-trigger.service
+Before=nvidia-persistenced.service nvidia-fabricmanager.service nvidia-mps.service set-nvidia-clocks.service nvidia-powerd.service nvidia-cdi-refresh.service docker.service ecs.service multi-user.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/nvidia-m3-activate auto
+
+[Install]
+WantedBy=multi-user.target
