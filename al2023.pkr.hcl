@@ -54,7 +54,8 @@ build {
     "source.amazon-ebs.al2023",
     "source.amazon-ebs.al2023arm",
     "source.amazon-ebs.al2023neu",
-    "source.amazon-ebs.al2023gpu"
+    "source.amazon-ebs.al2023gpu",
+    "source.amazon-ebs.al2023gpu-optionb"
   ]
 
   provisioner "file" {
@@ -214,7 +215,7 @@ build {
   provisioner "file" {
     source      = "NVIDIA_DRIVER_VERSION"
     destination = "/tmp/NVIDIA_DRIVER_VERSION"
-    only        = ["amazon-ebs.al2023gpu"]
+    only        = ["amazon-ebs.al2023gpu", "amazon-ebs.al2023gpu-optionb"]
   }
 
   provisioner "shell" {
@@ -228,6 +229,7 @@ build {
       "scripts/al2023/gpu/install-nvidia-driver.sh",
       "scripts/al2023/gpu/enable-ecs-agent-gpu-support-al2023.sh"
     ]
+    only = ["amazon-ebs.al2023gpu"]
   }
 
   provisioner "shell" {
@@ -236,7 +238,7 @@ build {
       "AIR_GAPPED=${var.air_gapped}"
     ]
     script = "scripts/al2023/gpu/install-dcgm.sh"
-    only   = ["amazon-ebs.al2023gpu"]
+    only   = ["amazon-ebs.al2023gpu", "amazon-ebs.al2023gpu-optionb"]
   }
 
   ### Dynamic NVIDIA driver *version* selection (LTS 580 + staged PB 595, swapped at boot).
@@ -273,6 +275,49 @@ build {
     ]
     script = "scripts/al2023/gpu/stage-nvidia-pb.sh"
     only   = ["amazon-ebs.al2023gpu"]
+  }
+
+  ### EKS-parity NVIDIA driver layout (Option B): co-resident per-branch trees under /opt/nvidia,
+  ### selected at boot by overlay mounts + rpm --justdb registration. Option B installs NO driver
+  ### natively (install-nvidia-driver.sh/stage-nvidia-pb.sh are al2023gpu-only); stage-nvidia-optionb.sh
+  ### builds both trees and the boot units, then the GPU agent-support script wires the nvidia runtime.
+  provisioner "shell" {
+    inline_shebang = "/bin/sh -ex"
+    inline         = ["mkdir -p /tmp/nvidia-select"]
+    only           = ["amazon-ebs.al2023gpu-optionb"]
+  }
+
+  provisioner "file" {
+    sources = [
+      "scripts/al2023/gpu/stage-nvidia-optionb.sh",
+      "scripts/al2023/gpu/nvidia-driver-resolve.sh",
+      "scripts/al2023/gpu/nvidia-setup.sh",
+      "scripts/al2023/gpu/nvidia-driver-resolve.service",
+      "scripts/al2023/gpu/nvidia-setup.service",
+      "scripts/al2023/gpu/usr-bin.mount",
+      "scripts/al2023/gpu/usr-lib64.mount",
+      "scripts/al2023/gpu/usr-share.mount",
+      "scripts/al2023/gpu/pb-required.devices"
+    ]
+    destination = "/tmp/nvidia-select/"
+    only        = ["amazon-ebs.al2023gpu-optionb"]
+  }
+
+  provisioner "shell" {
+    environment_vars = [
+      "AMI_TYPE=${source.name}",
+      "AIR_GAPPED=${var.air_gapped}",
+      "REGION=${var.region}",
+      "SKIP_GRID_DRIVER_REGIONS=${local.skip_grid_driver_regions}",
+      "NVIDIA_DRIVER_VERSION_FILE=/tmp/NVIDIA_DRIVER_VERSION",
+      "NVIDIA_DRIVER_PB_VERSION=${var.nvidia_driver_version_al2023_pb}",
+      "NVIDIA_SELECT_SRC=/tmp/nvidia-select"
+    ]
+    scripts = [
+      "scripts/al2023/gpu/stage-nvidia-optionb.sh",
+      "scripts/al2023/gpu/enable-ecs-agent-gpu-support-al2023.sh"
+    ]
+    only = ["amazon-ebs.al2023gpu-optionb"]
   }
 
   provisioner "shell" {

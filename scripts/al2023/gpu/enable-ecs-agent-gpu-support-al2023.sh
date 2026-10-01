@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -ex
 
-# Only proceed for AL2023 GPU AMIs
-if [[ $AMI_TYPE != "al2023"*"gpu" ]]; then
+# Only proceed for AL2023 GPU AMIs (Option A `al2023gpu` and EKS-parity `al2023gpu-optionb`).
+# Both need ECS GPU support + the nvidia container runtime wiring; they differ only in how the
+# driver itself is laid down (native install vs co-resident trees).
+if [[ $AMI_TYPE != "al2023"*"gpu" && $AMI_TYPE != "al2023gpu-optionb" ]]; then
     exit 0
 fi
 

@@ -1,0 +1,48 @@
+locals {
+  ami_name_al2023gpuoptionb = "${var.ami_name_prefix_al2023}-gpu-optionb-hvm-2023.0.${var.ami_version_al2023}${var.kernel_version_al2023}-x86_64-ebs"
+  default_tags_al2023gpuoptionb = {
+    os_version          = "Amazon Linux 2023"
+    source_image_name   = "{{ .SourceAMIName }}"
+    ecs_runtime_version = "Docker version ${var.docker_version_al2023}"
+    ecs_agent_version   = "${var.ecs_agent_version}"
+    ami_type            = "al2023gpu-optionb"
+    ami_version         = "2023.0.${var.ami_version_al2023}"
+  }
+  merged_tags_al2023gpuoptionb = merge("${local.default_tags_al2023gpuoptionb}", "${var.tags}")
+}
+
+source "amazon-ebs" "al2023gpu-optionb" {
+  ami_name            = "${local.ami_name_al2023gpuoptionb}"
+  ami_description     = "Amazon Linux AMI 2023.0.${var.ami_version_al2023} x86_64 ECS HVM EBS (EKS-parity NVIDIA driver layout, Option B)"
+  instance_type       = var.gpu_instance_type
+  custom_endpoint_ec2 = var.custom_endpoint_ec2
+  launch_block_device_mappings {
+    volume_size           = var.block_device_size_gb_optionb
+    delete_on_termination = true
+    volume_type           = "gp3"
+    device_name           = "/dev/xvda"
+  }
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required" // This enforces IMDSv2
+    http_put_response_hop_limit = 2
+  }
+  region = var.region
+  source_ami_filter {
+    filters = {
+      name = "${var.source_ami_al2023}"
+    }
+    owners             = var.source_ami_owners
+    most_recent        = true
+    include_deprecated = true
+  }
+  ami_ou_arns          = "${var.ami_ou_arns}"
+  ami_org_arns         = "${var.ami_org_arns}"
+  ami_users            = "${var.ami_users}"
+  ssh_interface        = "${var.ssh_interface}"
+  ssh_username         = "ec2-user"
+  iam_instance_profile = "${var.iam_instance_profile}"
+  subnet_id            = "${var.subnet_id}"
+  tags                 = "${local.merged_tags_al2023gpuoptionb}"
+  run_tags             = "${var.run_tags}"
+}

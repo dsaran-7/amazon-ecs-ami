@@ -1,0 +1,22 @@
+# /etc/systemd/system/usr-bin.mount (Option B, EKS-parity)
+# Overlay the selected NVIDIA tree's usr/bin over the host /usr/bin. nvidia-driver-resolve points
+# /opt/nvidia/current at the chosen tree before this mounts (Requires/After below).
+#
+# An upperdir MUST be set, or the overlay becomes an EROFS layer and later `dnf`/`rpm` operations on
+# /usr break (EKS documented caveat). Only ONE named mount unit may own a given path, so a custom AMI
+# that already overlays /usr/bin must fold its logic into this unit.
+[Unit]
+Description=NVIDIA Option B overlay for /usr/bin
+Requires=nvidia-driver-resolve.service
+After=nvidia-driver-resolve.service
+Before=nvidia-setup.service
+ConditionPathExists=/opt/nvidia/current/usr/bin
+
+[Mount]
+What=overlay
+Where=/usr/bin
+Type=overlay
+Options=lowerdir=/opt/nvidia/current/usr/bin:/usr/bin,upperdir=/var/lib/ecs/nvidia/bin/upper,workdir=/var/lib/ecs/nvidia/bin/work
+
+[Install]
+WantedBy=multi-user.target

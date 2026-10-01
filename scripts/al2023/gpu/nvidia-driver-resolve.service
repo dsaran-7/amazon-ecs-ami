@@ -1,0 +1,29 @@
+# /etc/systemd/system/nvidia-driver-resolve.service (Option B, EKS-parity)
+# First of the two Option B boot units. Resolves the target NVIDIA driver *version* for this instance
+# (by instance type, the EKS mechanism) and the *flavor* (by PCI subdevice, as the current AMI does),
+# points /opt/nvidia/current at the chosen tree, and writes the .driver-flavor sentinel. It does NOT
+# touch the running system beyond the symlink/sentinel; nvidia-setup commits.
+#
+# Ordering mirrors Option A's nvidia-driver-select so the A-vs-B boot-before-ECS comparison is fair:
+#  - After=cloud-init.service: a cloud-config override can land first; coldplug/local-fs are up.
+#  - Before= the three overlay mounts (they read /opt/nvidia/current), nvidia-setup, and every driver
+#    consumer: persistenced/fabricmanager/mps/clocks/powerd/gridd/topologyd, cdi-refresh, dcgm, docker,
+#    ecs (ecs-init NVML discovery) and cloud-final (user-data may use the GPU).
+[Unit]
+Description=Resolve NVIDIA driver branch+flavor for attached GPUs (Option B, EKS-parity)
+After=cloud-init.service
+Before=usr-bin.mount usr-lib64.mount usr-share.mount nvidia-setup.service
+Before=nvidia-persistenced.service nvidia-fabricmanager.service nvidia-mps.service
+Before=set-nvidia-clocks.service nvidia-powerd.service nvidia-gridd.service nvidia-topologyd.service
+Before=nvidia-cdi-refresh.service nvidia-dcgm.service docker.service ecs.service cloud-final.service
+ConditionPathExists=/etc/ecs/nvidia-driver-select/optionb-branches
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/nvidia-optionb/nvidia-driver-resolve
+TimeoutStartSec=120
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

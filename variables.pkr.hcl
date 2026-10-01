@@ -45,6 +45,12 @@ variable "block_device_size_gb" {
   default     = 30
 }
 
+variable "block_device_size_gb_optionb" {
+  type        = number
+  description = "Size of the root block device for the EKS-parity Option B GPU AMI. Larger than the default because Option B keeps two co-resident per-branch NVIDIA trees under /opt/nvidia (EKS measured ~1.7 GB per tree) plus the natively installed shared base."
+  default     = 40
+}
+
 variable "ecs_agent_version" {
   type        = string
   description = "ECS agent version to build AMI with."
