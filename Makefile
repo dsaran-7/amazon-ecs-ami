@@ -97,6 +97,10 @@ al2023neu: check-region init validate release-al2023.auto.pkrvars.hcl
 al2023gpu: check-region init validate release-al2023.auto.pkrvars.hcl
 	./packer build -only="amazon-ebs.al2023gpu" -var "region=${REGION}" .
 
+.PHONY: al2023gpu-optionb
+al2023gpu-optionb: check-region init validate release-al2023.auto.pkrvars.hcl
+	./packer build -only="amazon-ebs.al2023gpu-optionb" -var "region=${REGION}" .
+
 shellcheck:
 	curl -fLSs ${SHELLCHECK_URL} -o /tmp/shellcheck.tar.xz
 	tar -xvf /tmp/shellcheck.tar.xz -C /tmp --strip-components=1

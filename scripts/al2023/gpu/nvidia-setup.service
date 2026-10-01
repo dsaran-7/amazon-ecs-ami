@@ -1,0 +1,26 @@
+# /etc/systemd/system/nvidia-setup.service (Option B, EKS-parity)
+# Second Option B boot unit. Runs AFTER the three overlay mounts have layered the resolved tree's
+# usr/{bin,lib64,share} over the host, and commits the driver: reflink /etc, copy modules+firmware
+# (first boot), depmod, load the kernel modules, enable+start the daemon subset for the flavor, and
+# register the version-specific RPMs in the rpmdb with `rpm --justdb` (gated on .driver-committed).
+#
+# Ordered Before= the same consumers nvidia-driver-resolve is, so the driver is fully committed before
+# ecs.service (ecs-init NVML discovery) — matching Option A's boot-before-ECS guarantee.
+[Unit]
+Description=Commit the resolved NVIDIA driver tree (Option B, EKS-parity)
+Requires=nvidia-driver-resolve.service usr-bin.mount usr-lib64.mount usr-share.mount
+After=nvidia-driver-resolve.service usr-bin.mount usr-lib64.mount usr-share.mount
+Before=nvidia-persistenced.service nvidia-fabricmanager.service nvidia-mps.service
+Before=set-nvidia-clocks.service nvidia-powerd.service nvidia-gridd.service nvidia-topologyd.service
+Before=nvidia-cdi-refresh.service nvidia-dcgm.service docker.service ecs.service cloud-final.service
+ConditionPathExists=/opt/nvidia/current
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/nvidia-optionb/nvidia-setup
+TimeoutStartSec=300
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

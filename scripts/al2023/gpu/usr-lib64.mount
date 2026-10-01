@@ -1,0 +1,18 @@
+# /etc/systemd/system/usr-lib64.mount (Option B, EKS-parity)
+# Overlay the selected NVIDIA tree's usr/lib64 over the host /usr/lib64. See usr-bin.mount for the
+# upperdir rationale and the single-owner caveat.
+[Unit]
+Description=NVIDIA Option B overlay for /usr/lib64
+Requires=nvidia-driver-resolve.service
+After=nvidia-driver-resolve.service
+Before=nvidia-setup.service
+ConditionPathExists=/opt/nvidia/current/usr/lib64
+
+[Mount]
+What=overlay
+Where=/usr/lib64
+Type=overlay
+Options=lowerdir=/opt/nvidia/current/usr/lib64:/usr/lib64,upperdir=/var/lib/ecs/nvidia/lib64/upper,workdir=/var/lib/ecs/nvidia/lib64/work
+
+[Install]
+WantedBy=multi-user.target
