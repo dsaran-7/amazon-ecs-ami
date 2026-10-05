@@ -37,17 +37,14 @@ if [ -L "$NV/current" ] && [ -e "$STATE/.resolved" ]; then
   exit 0
 fi
 
-# ---------- version by instance type (IMDSv2) ----------
-imds_token() { curl -sf -X PUT "http://169.254.169.254/latest/api/token" \
-  -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true; }
+# ---------- version by instance type (DMI) ----------
+# Read from DMI product_name, as EKS does, NOT IMDS: this unit runs right after local-fs.target, before
+# networking, so the three /usr overlays can mount early without an ordering cycle (see the .service).
+# On Nitro, product_name is the instance type (e.g. g7.2xlarge).
+DMI_PRODUCT_NAME="${NVOPTIONB_DMI_PRODUCT_NAME:-/sys/devices/virtual/dmi/id/product_name}"
 instance_type() {
-  local tok; tok=$(imds_token)
-  if [ -n "$tok" ]; then
-    curl -sf -H "X-aws-ec2-metadata-token: $tok" \
-      "http://169.254.169.254/latest/meta-data/instance-type" 2>/dev/null && return 0
-  fi
-  # IMDS unreachable (e.g. air-gapped test): allow a test override.
-  echo "${NVOPTIONB_TEST_INSTANCE_TYPE:-}"
+  if [ -n "${NVOPTIONB_TEST_INSTANCE_TYPE:-}" ]; then echo "$NVOPTIONB_TEST_INSTANCE_TYPE"; return 0; fi
+  [ -r "$DMI_PRODUCT_NAME" ] && tr -d '[:space:]' <"$DMI_PRODUCT_NAME"
 }
 ITYPE=$(instance_type)
 FAMILY="${ITYPE%%.*}"
