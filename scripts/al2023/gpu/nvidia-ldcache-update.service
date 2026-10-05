@@ -1,0 +1,20 @@
+# /etc/systemd/system/nvidia-ldcache-update.service (Option B, EKS-parity)
+# Rebuild /etc/ld.so.cache once the selected tree's usr/lib64 is overlaid. Libraries unpacked with rpm2cpio
+# and layered by an overlay never fire glibc's ldconfig file trigger, so without this the cache built into
+# the AMI lacks the driver libraries (EKS #2835; measured here as `ldconfig -p | grep -c libcuda` = 0).
+# Unlike EKS, also ordered Before= the ECS-side consumers, so docker/nvidia-container-runtime (legacy mode)
+# and ecs-init never start against a stale cache.
+[Unit]
+Description=Rebuild ld.so.cache for the overlaid NVIDIA libraries (Option B, EKS-parity)
+Requires=usr-lib64.mount
+After=usr-lib64.mount
+Before=nvidia-cdi-refresh.service docker.service ecs.service cloud-final.service
+ConditionPathExists=/opt/nvidia/current/usr/lib64
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/sbin/ldconfig
+
+[Install]
+WantedBy=multi-user.target

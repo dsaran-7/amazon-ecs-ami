@@ -323,6 +323,7 @@ sudo install -D -m0755 "$SRC/nvidia-driver-resolve.sh" /usr/libexec/nvidia-optio
 sudo install -D -m0755 "$SRC/nvidia-setup.sh" /usr/libexec/nvidia-optionb/nvidia-setup
 sudo install -D -m0644 "$SRC/nvidia-driver-resolve.service" /etc/systemd/system/nvidia-driver-resolve.service
 sudo install -D -m0644 "$SRC/nvidia-setup.service" /etc/systemd/system/nvidia-setup.service
+sudo install -D -m0644 "$SRC/nvidia-ldcache-update.service" /etc/systemd/system/nvidia-ldcache-update.service
 for m in usr-bin usr-lib64 usr-share; do
     sudo install -D -m0644 "$SRC/$m.mount" "/etc/systemd/system/$m.mount"
 done
@@ -330,8 +331,20 @@ done
 sudo mkdir -p /var/lib/ecs/nvidia/{bin,lib64,share}/{upper,work}
 
 sudo systemctl daemon-reload
-sudo systemctl enable nvidia-driver-resolve.service nvidia-setup.service
+sudo systemctl enable nvidia-driver-resolve.service nvidia-setup.service nvidia-ldcache-update.service
 sudo systemctl enable usr-bin.mount usr-lib64.mount usr-share.mount
+
+# Guard: the boot units must not form a systemd ordering cycle. systemd "resolves" a cycle at boot by
+# deleting a job on the loop, sometimes nvidia-driver-resolve itself (GPU-less host). Simulate the boot
+# transaction now and fail the build instead. Only "ordering cycle" lines fail; other verify warnings
+# (unrelated stock units) are logged but tolerated.
+verify_out=$(sudo systemd-analyze verify --man=no default.target nvidia-driver-resolve.service \
+    usr-bin.mount usr-lib64.mount usr-share.mount nvidia-setup.service nvidia-ldcache-update.service 2>&1 || true)
+if grep -qi 'ordering cycle' <<<"$verify_out"; then
+    echo "$verify_out" >&2
+    die "Option B boot units form a systemd ordering cycle"
+fi
+echo "GUARD boot units: OK (no ordering cycle in systemd-analyze verify)"
 
 # -------- 7. sizes + cleanup --------
 step "7 sizes + cleanup"

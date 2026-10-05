@@ -294,6 +294,7 @@ build {
       "scripts/al2023/gpu/nvidia-setup.sh",
       "scripts/al2023/gpu/nvidia-driver-resolve.service",
       "scripts/al2023/gpu/nvidia-setup.service",
+      "scripts/al2023/gpu/nvidia-ldcache-update.service",
       "scripts/al2023/gpu/usr-bin.mount",
       "scripts/al2023/gpu/usr-lib64.mount",
       "scripts/al2023/gpu/usr-share.mount",

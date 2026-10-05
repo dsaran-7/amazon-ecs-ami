@@ -7,8 +7,12 @@
 # that already overlays /usr/bin must fold its logic into this unit.
 [Unit]
 Description=NVIDIA Option B overlay for /usr/bin
+# DefaultDependencies=no (EKS): a mount otherwise gets Before=local-fs.target, which cycles with the
+# resolver ordered After=local-fs.target. See nvidia-driver-resolve.service.
+DefaultDependencies=no
 Requires=nvidia-driver-resolve.service
-After=nvidia-driver-resolve.service
+After=local-fs.target nvidia-driver-resolve.service
+RequiresMountsFor=/var
 Before=nvidia-setup.service
 ConditionPathExists=/opt/nvidia/current/usr/bin
 
@@ -19,4 +23,4 @@ Type=overlay
 Options=lowerdir=/opt/nvidia/current/usr/bin:/usr/bin,upperdir=/var/lib/ecs/nvidia/bin/upper,workdir=/var/lib/ecs/nvidia/bin/work
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=local-fs.target

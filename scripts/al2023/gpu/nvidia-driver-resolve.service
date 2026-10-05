@@ -4,14 +4,19 @@
 # points /opt/nvidia/current at the chosen tree, and writes the .driver-flavor sentinel. It does NOT
 # touch the running system beyond the symlink/sentinel; nvidia-setup commits.
 #
-# Ordering mirrors Option A's nvidia-driver-select so the A-vs-B boot-before-ECS comparison is fair:
-#  - After=cloud-init.service: a cloud-config override can land first; coldplug/local-fs are up.
+# Ordering follows EKS, NOT Option A's nvidia-driver-select:
+#  - DefaultDependencies=no + After=local-fs.target: the three overlay mounts are ordered after this unit,
+#    and mounts sit in early boot (before sysinit/basic). With default dependencies (After=basic.target)
+#    or After=cloud-init.service this formed mount -> resolve -> basic -> sysinit -> local-fs -> mount,
+#    and systemd broke the cycle by deleting a random job on every boot (measured on 8/8 bench boots,
+#    sometimes this unit itself). The resolver therefore reads DMI, not IMDS, and needs no network.
 #  - Before= the three overlay mounts (they read /opt/nvidia/current), nvidia-setup, and every driver
 #    consumer: persistenced/fabricmanager/mps/clocks/powerd/gridd/topologyd, cdi-refresh, dcgm, docker,
 #    ecs (ecs-init NVML discovery) and cloud-final (user-data may use the GPU).
 [Unit]
 Description=Resolve NVIDIA driver branch+flavor for attached GPUs (Option B, EKS-parity)
-After=cloud-init.service
+DefaultDependencies=no
+After=local-fs.target
 Before=usr-bin.mount usr-lib64.mount usr-share.mount nvidia-setup.service
 Before=nvidia-persistenced.service nvidia-fabricmanager.service nvidia-mps.service
 Before=set-nvidia-clocks.service nvidia-powerd.service nvidia-gridd.service nvidia-topologyd.service
