@@ -64,6 +64,7 @@ fi
 
 t() { local s rc; s=$(date +%s%N); set +e; "$@"; rc=$?; set -e; echo "TIME $(( ($(date +%s%N) - s) / 1000000 ))ms rc=$rc: $*"; return $rc; }
 step() { echo; echo "=== $(date -u +%T) $*"; }
+die() { echo "ERROR: $*" >&2; exit 1; }
 
 # -------- 0. build tools + kernel headers (Option B installs nothing nvidia natively) --------
 step "0 build prerequisites"
@@ -101,6 +102,7 @@ VS_NAMES=(libnvidia-cfg libnvidia-fbc libnvidia-gpucomp libnvidia-ml nvidia-driv
     nvidia-libXNVCtrl nvidia-libXNVCtrl-devel nvidia-modprobe nvidia-persistenced nvidia-settings
     nvidia-xconfig xorg-x11-nvidia)
 specs() { local n; for n in "${VS_NAMES[@]}"; do echo "$n-$1"; done; }
+is_vs_name() { local n; for n in "${VS_NAMES[@]}"; do [[ $n == "$1" ]] && return 0; done; return 1; }
 
 # -------- download both closures --------
 # EKS downloads the FULL closure of the version-specific set for each branch, then splits shared vs
@@ -128,6 +130,21 @@ dl_closure() { # dl_closure VERSION USERSPACE_DEST KMOD_DEST
     t sudo dnf -y download --resolve --disableplugin=versionlock \
         --destdir="$dest" \
         $(specs "$v") egl-wayland egl-wayland2
+    # --resolve satisfies the UNVERSIONED nvidia inter-package Requires with the NEWEST provider, so the
+    # LTS closure also receives PB copies of some VS_NAMES (measured: 8 names, 28 manifest entries instead
+    # of 20). --resolve must stay (it supplies the shared non-nvidia closure), so drop every downloaded
+    # VS_NAMES rpm whose VERSION is not this branch's, logging each one.
+    local rpm nv n ver ng
+    ng=$(shopt -p nullglob || true); shopt -s nullglob
+    for rpm in "$dest"/*.rpm; do
+        nv=$(rpm -qp --qf '%{NAME} %{VERSION}' "$rpm" 2>/dev/null) || die "cannot read $rpm"
+        n=${nv% *}; ver=${nv#* }
+        if is_vs_name "$n" && [[ $ver != "$v" ]]; then
+            echo "dl_closure($v): dropping off-branch $(basename "$rpm") (name=$n version=$ver)"
+            sudo rm -f "$rpm"
+        fi
+    done
+    eval "$ng"
     sudo rm -f "$dest"/kmod-nvidia-*-dkms-*.rpm
     # Plain download (no dependency/conflict resolution) of the two conflicting kmod source rpms.
     t sudo dnf -y download --disableplugin=versionlock --destdir="$kdest" \
@@ -242,6 +259,29 @@ build_tree() { # build_tree VERSION TREENAME CLOSURE
         sudo cp "$rpm" "$tree/.rpms/"
     done
     echo "tree '$name': $(ls "$tree/.rpms" | wc -l) version-specific RPMs unpacked + staged for justdb"
+
+    # Guard: every VS_NAMES name must be staged EXACTLY ONCE, at VERSION=$v. nullglob so an empty .rpms/
+    # fails as "missing" instead of iterating a literal glob.
+    local -A seen=()
+    local r nv n ver ng bad=0
+    ng=$(shopt -p nullglob || true); shopt -s nullglob
+    for r in "$tree/.rpms"/*.rpm; do
+        nv=$(rpm -qp --qf '%{NAME} %{VERSION}' "$r" 2>/dev/null) || die "tree '$name': cannot read $r"
+        n=${nv% *}; ver=${nv#* }
+        is_vs_name "$n" || continue
+        if [[ $ver != "$v" ]]; then echo "GUARD tree '$name': $n has version $ver, want $v" >&2; bad=1; fi
+        seen[$n]=$(( ${seen[$n]:-0} + 1 ))
+    done
+    eval "$ng"
+    for n in "${VS_NAMES[@]}"; do
+        case "${seen[$n]:-0}" in
+            1) ;;
+            0) echo "GUARD tree '$name': $n missing" >&2; bad=1 ;;
+            *) echo "GUARD tree '$name': $n present ${seen[$n]} times" >&2; bad=1 ;;
+        esac
+    done
+    [[ $bad -eq 0 ]] || die "tree '$name' ($v): version-specific guard FAILED"
+    echo "GUARD tree '$name' ($v): OK (${#VS_NAMES[@]} VS_NAMES, each exactly once at $v)"
 
     step "tree '$name' ($v): build + harvest kmods (open, proprietary$([[ -z $skip_grid_driver ]] && echo , grid))"
     build_open_kmods "$v" "$tree" "$closure"
