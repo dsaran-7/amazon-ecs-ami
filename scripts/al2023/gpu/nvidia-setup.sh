@@ -5,8 +5,9 @@
 # at the chosen tree and written .driver-flavor, and the three overlay mounts have layered the tree's
 # usr/{bin,lib64,share} over the host. This script then COMMITS the driver:
 #   * /etc config:    reflink-copy the tree's /etc over the host /etc (every boot, no-clobber).
-#   * modules+fw:     copy the flavor's extra/*.ko and firmware into /lib/modules + /lib/firmware,
-#                     then depmod (first boot only, gated by .driver-committed).
+#   * modules+fw:     copy the flavor's extra/*.ko into /lib/modules and the shared tree's
+#                     usr/lib/firmware (GSP blobs) into /usr/lib/firmware, then depmod
+#                     (first boot only, gated by .driver-committed).
 #   * module load:    modprobe nvidia then the rest of the flavor's modules (every boot).
 #   * daemons:        copy all of the tree's units to /usr/lib/systemd/system, then enable+start the
 #                     flavor's subset (first boot only). GRID adds nvidia-gridd.
@@ -39,10 +40,11 @@
 #      We check each copy's exit status and FAIL LOUDLY with the failing step; nothing is half-loaded
 #      because modprobe runs only after the copies succeed.
 #   5. CHECKSUM / SIGNATURE. Option B does NOT run a boot-time dnf transaction, so there is no gpg/
-#      checksum gate at boot (the RPMs were verified with `rpm -K` at BUILD time, in stage-nvidia-
-#      optionb.sh, and justdb uses --nodigest --nosignature by design -- EKS's own flags). This is a
-#      genuine difference from Option A, which verifies gpg+sha256 at boot; it is called out in the
-#      A-vs-B writeup, not silently ignored.
+#      checksum gate at boot, and justdb uses --nodigest --nosignature by design (EKS's own flags).
+#      stage-nvidia-optionb.sh does not run `rpm -K` or gpgcheck at build time either, so the
+#      unpacked RPMs are not signature-verified anywhere. This is a genuine difference from
+#      Option A, which runs `rpm -K` at build and verifies gpg+sha256 at boot; it is called out in
+#      the A-vs-B writeup, not silently ignored.
 # ---------------------------------------------------------------------------------------------------
 set -Eeuo pipefail
 shopt -s nullglob
@@ -92,11 +94,24 @@ if [ ! -e "$COMMITTED" ]; then
   else
     die "no modules for flavor $FLAVOR at $FLAVOR_SUBTREE/lib/modules/$K/extra"
   fi
-  # Firmware, if the tree carries any (lib/firmware/nvidia/<ver>).
-  for fwsrc in "$CUR"/lib/firmware "$FLAVOR_SUBTREE"/lib/firmware; do
+  # Version-specific GSP firmware (gsp_*.bin) lives in the shared tree's usr/lib/firmware/nvidia/<ver>,
+  # unpacked there by nvidia-kmod-common. On AL2023 /lib -> usr/lib and /usr/lib/firmware is a plain
+  # dir, so FW_DST=/lib/firmware writes to /usr/lib/firmware where the kernel loader looks.
+  for fwsrc in "$CUR"/usr/lib/firmware "$FLAVOR_SUBTREE"/usr/lib/firmware; do
     [ -d "$fwsrc" ] || continue
     cp -a --reflink=auto "$fwsrc/." "$FW_DST/" || die "copying firmware from $fwsrc failed (disk full?)"
   done
+  # Fail loudly if the resolved flavor needs GSP firmware but the resolved version's blobs did not land
+  # (the exact silent bug: module loads, RmInitAdapter fails "No firmware image found", nvidia-smi shows
+  # no devices). All Turing+ GPUs need it; GRID's GSP comes from the same shared tree, so it is covered.
+  VER=$(sed -n 's/^version=//p' "$RUN/resolved" 2>/dev/null)
+  [ -n "$VER" ] || die "cannot read resolved version from $RUN/resolved (did nvidia-driver-resolve run?)"
+  case "$FLAVOR" in
+    open|proprietary|grid)
+      compgen -G "$FW_DST/nvidia/$VER/gsp_*.bin" >/dev/null \
+        || die "no GSP firmware for $VER at $FW_DST/nvidia/$VER (flavor=$FLAVOR); GPU init would fail"
+      ;;
+  esac
   depmod "$K" || die "depmod failed"
   log "depmod done"
 fi
