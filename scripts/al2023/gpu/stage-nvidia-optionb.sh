@@ -321,9 +321,11 @@ sudo cp "$SRC/pb-required.devices" "$CONF/" 2>/dev/null || true
 
 sudo install -D -m0755 "$SRC/nvidia-driver-resolve.sh" /usr/libexec/nvidia-optionb/nvidia-driver-resolve
 sudo install -D -m0755 "$SRC/nvidia-setup.sh" /usr/libexec/nvidia-optionb/nvidia-setup
+sudo install -D -m0755 "$SRC/nvidia-override-apply.sh" /usr/libexec/nvidia-optionb/nvidia-override-apply
 sudo install -D -m0644 "$SRC/nvidia-driver-resolve.service" /etc/systemd/system/nvidia-driver-resolve.service
 sudo install -D -m0644 "$SRC/nvidia-setup.service" /etc/systemd/system/nvidia-setup.service
 sudo install -D -m0644 "$SRC/nvidia-ldcache-update.service" /etc/systemd/system/nvidia-ldcache-update.service
+sudo install -D -m0644 "$SRC/nvidia-override-apply.service" /etc/systemd/system/nvidia-override-apply.service
 for m in usr-bin usr-lib64 usr-share; do
     sudo install -D -m0644 "$SRC/$m.mount" "/etc/systemd/system/$m.mount"
 done
@@ -331,7 +333,7 @@ done
 sudo mkdir -p /var/lib/ecs/nvidia/{bin,lib64,share}/{upper,work}
 
 sudo systemctl daemon-reload
-sudo systemctl enable nvidia-driver-resolve.service nvidia-setup.service nvidia-ldcache-update.service
+sudo systemctl enable nvidia-driver-resolve.service nvidia-setup.service nvidia-ldcache-update.service nvidia-override-apply.service
 sudo systemctl enable usr-bin.mount usr-lib64.mount usr-share.mount
 
 # Guard: the boot units must not form a systemd ordering cycle. systemd "resolves" a cycle at boot by
@@ -339,7 +341,7 @@ sudo systemctl enable usr-bin.mount usr-lib64.mount usr-share.mount
 # transaction now and fail the build instead. Only "ordering cycle" lines fail; other verify warnings
 # (unrelated stock units) are logged but tolerated.
 verify_out=$(sudo systemd-analyze verify --man=no default.target nvidia-driver-resolve.service \
-    usr-bin.mount usr-lib64.mount usr-share.mount nvidia-setup.service nvidia-ldcache-update.service 2>&1 || true)
+    usr-bin.mount usr-lib64.mount usr-share.mount nvidia-setup.service nvidia-ldcache-update.service nvidia-override-apply.service 2>&1 || true)
 if grep -qi 'ordering cycle' <<<"$verify_out"; then
     echo "$verify_out" >&2
     die "Option B boot units form a systemd ordering cycle"

@@ -62,6 +62,9 @@ log() { echo "[+$(el)ms] setup: $*"; }
 die() { log "ERROR: $*"; exit 1; }
 
 mkdir -p "$RUN" "$STATE"
+# nvidia-override-apply re-pointed /opt/nvidia/current and requested a reboot; the overlays still hold the
+# previous tree, so committing now would commit the wrong one.
+if [ -e "$RUN/override-reboot-pending" ]; then log "reboot pending to apply the driver-branch override; skipping"; exit 0; fi
 [ -L "$CUR" ] && [ -d "$CUR" ] || die "$CUR is not a resolved tree (did nvidia-driver-resolve run?)"
 FLAVOR=$(cat "$CUR/.driver-flavor" 2>/dev/null || echo open)
 FLAVOR_SUBTREE="$CUR/flavors/$FLAVOR"
@@ -104,7 +107,7 @@ if [ ! -e "$COMMITTED" ]; then
   # Fail loudly if the resolved flavor needs GSP firmware but the resolved version's blobs did not land
   # (the exact silent bug: module loads, RmInitAdapter fails "No firmware image found", nvidia-smi shows
   # no devices). All Turing+ GPUs need it; GRID's GSP comes from the same shared tree, so it is covered.
-  VER=$(sed -n 's/^version=//p' "$RUN/resolved" 2>/dev/null)
+  VER=$(sed -n 's/^version=//p' "$RUN/resolved" 2>/dev/null || true)
   [ -n "$VER" ] || die "cannot read resolved version from $RUN/resolved (did nvidia-driver-resolve run?)"
   case "$FLAVOR" in
     open|proprietary|grid)

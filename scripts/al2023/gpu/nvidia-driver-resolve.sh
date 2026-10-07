@@ -28,12 +28,29 @@ mkdir -p "$RUN" "$STATE"
 . "$CONF/optionb-branches"
 [ -n "${LTS_VERSION:-}" ] && [ -n "${PB_VERSION:-}" ] || die "optionb-branches incomplete"
 
+# ---------- after an override switch: start the new tree with empty overlay upper layers ----------
+# nvidia-override-apply re-pointed the tree and rebooted. Anything written through the overlays while the
+# previous tree was mounted would otherwise shadow the new tree. This unit runs before the mounts.
+if [ -e "$STATE/.clear-overlay-upper" ]; then
+  for d in bin lib64 share; do rm -rf /var/lib/ecs/nvidia/$d/upper /var/lib/ecs/nvidia/$d/work; mkdir -p /var/lib/ecs/nvidia/$d/upper /var/lib/ecs/nvidia/$d/work; done
+  rm -f "$STATE/.clear-overlay-upper"
+  log "cleared overlay upper/work dirs after a driver-branch override switch"
+fi
+
 # ---------- resolve-once (EKS behavior) ----------
 # EKS resolves on first boot and keeps the result; the other tree may even be deleted. We keep both
 # trees (so a reboot is a true no-op and we can measure it), but we DO honor resolve-once semantics:
 # once committed, we do not flip the symlink. nvidia-setup's own .driver-committed gates the heavy work.
 if [ -L "$NV/current" ] && [ -e "$STATE/.resolved" ]; then
-  log "already resolved to $(readlink "$NV/current") (resolve-once); nothing to do"
+  # $RUN is tmpfs, so re-derive $RUN/resolved from the kept symlink. nvidia-setup reads it on any boot
+  # before its first commit, which includes the boot right after an nvidia-override-apply switch.
+  TREE=$(readlink "$NV/current"); branch=$(basename "$TREE")
+  case "$branch" in lts) version=$LTS_VERSION ;; pb) version=$PB_VERSION ;; *) die "unknown tree $TREE" ;; esac
+  flavor=$(cat "$NV/current/.driver-flavor" 2>/dev/null || echo open)
+  ITYPE=$(tr -d '[:space:]' </sys/devices/virtual/dmi/id/product_name 2>/dev/null || true)
+  printf 'branch=%s\nversion=%s\nflavor=%s\ntree=%s\ninstance_type=%s\n' \
+    "$branch" "$version" "$flavor" "$TREE" "${ITYPE:-unknown}" >"$RUN/resolved"
+  log "already resolved to $TREE (resolve-once); nothing to do"
   exit 0
 fi
 

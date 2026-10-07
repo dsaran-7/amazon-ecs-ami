@@ -10,6 +10,8 @@
 Description=Commit the resolved NVIDIA driver tree (Option B, EKS-parity)
 Requires=nvidia-driver-resolve.service usr-bin.mount usr-lib64.mount usr-share.mount
 After=nvidia-driver-resolve.service usr-bin.mount usr-lib64.mount usr-share.mount
+# After the customer override is applied (which waits for cloud-init); see nvidia-override-apply.service.
+After=nvidia-override-apply.service
 Before=nvidia-persistenced.service nvidia-fabricmanager.service nvidia-mps.service
 Before=set-nvidia-clocks.service nvidia-powerd.service nvidia-gridd.service nvidia-topologyd.service
 Before=nvidia-cdi-refresh.service nvidia-dcgm.service docker.service ecs.service cloud-final.service
