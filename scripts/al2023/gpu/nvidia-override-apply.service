@@ -1,0 +1,18 @@
+# /etc/systemd/system/nvidia-override-apply.service (Option B)
+# Apply the customer driver-branch override (same file as Option A). Must run after cloud-init.service,
+# because that is when a cloud-config write_files override exists, and before nvidia-setup commits the
+# resolved tree. See nvidia-override-apply.sh.
+[Unit]
+Description=Apply customer NVIDIA driver-branch override (Option B)
+After=cloud-init.service nvidia-driver-resolve.service
+Before=nvidia-setup.service docker.service ecs.service cloud-final.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/nvidia-optionb/nvidia-override-apply
+TimeoutStartSec=60
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target
