@@ -158,7 +158,10 @@ if [[ $platform == al2023* ]]; then
         # dnf check-upgrade only reports the single latest version across all majors,
         # so it can't detect updates within a pinned major. Instead, query the installed
         # version and all available within the pinned major, then intersect with GRID bucket locally.
-        gpu_cmd_installed="dnf repoquery --installed --arch=x86_64 --queryformat '%{version}' nvidia-driver-cuda"
+        # Option B/C AMIs keep the drivers in trees and register them in the rpmdb only on a GPU host, so on
+        # this non-GPU check instance the rpmdb has no nvidia-driver-cuda. Read the AMI's staged LTS version
+        # first; the file doesn't exist on Option A or today's AMI, which fall through to the rpmdb as before.
+        gpu_cmd_installed="sed -n 's/^LTS_VERSION=//p' /etc/ecs/nvidia-driver-select/optionb-branches 2>/dev/null | grep . || dnf repoquery --installed --arch=x86_64 --queryformat '%{version}' nvidia-driver-cuda"
         gpu_cmd_all="dnf repoquery --releasever=latest --disableplugin=versionlock --arch=x86_64 --queryformat '%{version}' nvidia-driver-cuda | grep '^${nvidia_driver_pinned_major}[.]' | sort -V"
         command_params="commands=[\"echo INSTALLED=\$(${gpu_cmd_installed})\",\"echo REPO_VERSIONS=\$(${gpu_cmd_all} | paste -sd,)\"]"
     else

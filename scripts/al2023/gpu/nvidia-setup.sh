@@ -59,7 +59,44 @@ JUSTDB_INPROGRESS="$STATE/.justdb-in-progress"
 T0=$(date +%s%N)
 el() { echo $(( ($(date +%s%N) - T0) / 1000000 )); }
 log() { echo "[+$(el)ms] setup: $*"; }
-die() { log "ERROR: $*"; exit 1; }
+die() { log "ERROR: $*"; try_fallback "$*"; exit 1; }
+LAYOUT=$(cat /etc/ecs/nvidia-driver-select/optionb-layout 2>/dev/null || echo overlay)
+LOADED_OK=0   # set once the nvidia module is loaded; after that a failure leaves a working GPU, so no fallback
+
+# ---------- fallback to the LTS tree (Option C only) ----------
+# Option A falls back to LTS 580 when the PB swap or load fails; Option B has no fallback, and a failed setup
+# leaves a host that joins ECS with no GPU (measured on G7 with a corrupted module). In the copy layout the
+# swap is safe within this boot: only the PB tree's own files were copied into /usr (the version-specific
+# packages are never installed natively), so they are removed by path before the LTS tree is copied in. Runs
+# at most once per instance. LTS drives every PB-required device today (2c3a, measured), with a warning.
+try_fallback() {
+  [ "$LAYOUT" = copy ] && [ "$LOADED_OK" = 0 ] || return 0
+  [ -e "$STATE/.fallback-attempted" ] && return 0
+  local cur; cur=$(basename "$(readlink "$CUR" 2>/dev/null)" 2>/dev/null || true)
+  [ "$cur" = pb ] || return 0
+  [ -d "$NV/lts/flavors/${FLAVOR:-open}" ] || { log "fallback: LTS tree has no ${FLAVOR:-open} flavor; not falling back"; return 0; }
+  touch "$STATE/.fallback-attempted"; sync
+  . /etc/ecs/nvidia-driver-select/optionb-branches
+  log "WARNING: UNQUALIFIED configuration: PB setup failed ($1); falling back to LTS $LTS_VERSION"
+  for m in nvidia_uvm nvidia_drm nvidia_modeset nvidia; do rmmod "$m" 2>/dev/null || true; done
+  local d f
+  for d in bin lib64 share; do
+    [ -d "$NV/pb/usr/$d" ] || continue
+    (cd "$NV/pb/usr/$d" && find . ! -type d -print0) | (cd "/usr/$d" && xargs -0 -r rm -f --)
+  done
+  for f in "$NV/pb/flavors/${FLAVOR:-open}/lib/modules/$K/extra"/*; do rm -f "/lib/modules/$K/extra/$(basename "$f")"; done
+  ln -sfn "$NV/lts" "$CUR"
+  printf '%s\n' "${FLAVOR:-open}" >"$CUR/.driver-flavor"
+  printf 'branch=lts\nversion=%s\nflavor=%s\ntree=%s\nfallback=from-pb\n' "$LTS_VERSION" "${FLAVOR:-open}" "$NV/lts" >"$RUN/resolved"
+  for d in bin lib64 share; do
+    [ -d "$NV/lts/usr/$d" ] || continue
+    cp -a --reflink=auto "$NV/lts/usr/$d/." "/usr/$d/" || { log "fallback: copying the LTS tree into /usr/$d failed"; exit 1; }
+  done
+  /sbin/ldconfig || true
+  rm -f "$COMMITTED"; sync
+  log "fallback: /opt/nvidia/current -> $NV/lts; re-running setup once"
+  exec "$0"
+}
 
 mkdir -p "$RUN" "$STATE"
 # nvidia-override-apply re-pointed /opt/nvidia/current and requested a reboot; the overlays still hold the
@@ -140,6 +177,7 @@ done
 /usr/bin/nvidia-modprobe -c 0 -u 2>/dev/null || true
 loaded=$(cat /sys/module/nvidia/version 2>/dev/null || true)
 [ -n "$loaded" ] || die "nvidia module not loaded after modprobe"
+LOADED_OK=1
 log "nvidia $loaded loaded ($(modinfo -F filename nvidia 2>/dev/null))"
 
 # ---------- daemons (first boot only) ----------
