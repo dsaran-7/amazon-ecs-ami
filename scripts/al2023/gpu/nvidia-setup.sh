@@ -72,10 +72,19 @@ FLAVOR_SUBTREE="$CUR/flavors/$FLAVOR"
 log "committing tree $(readlink "$CUR") flavor=$FLAVOR kernel=$K"
 
 # ---------- failure mode 1: verify the three overlays are actually mounted ----------
-for p in /usr/bin /usr/lib64 /usr/share; do
-  findmnt -no FSTYPE "$p" 2>/dev/null | grep -qx overlay || die "overlay not mounted at $p (mount unit failed); refusing to load a half-set-up driver"
-done
-log "all three /usr overlays mounted"
+LAYOUT=$(cat /etc/ecs/nvidia-driver-select/optionb-layout 2>/dev/null || echo overlay)
+if [ "$LAYOUT" = copy ]; then
+  # Option C: nvidia-usr-copy@{bin,lib64,share} copied the tree into /usr and left a sentinel each.
+  for d in bin lib64 share; do
+    [ -e "$STATE/.usr-$d-copied" ] || die "tree usr/$d not copied into /usr (nvidia-usr-copy@$d failed); refusing to load a half-set-up driver"
+  done
+  log "tree copied into /usr/{bin,lib64,share}"
+else
+  for p in /usr/bin /usr/lib64 /usr/share; do
+    findmnt -no FSTYPE "$p" 2>/dev/null | grep -qx overlay || die "overlay not mounted at $p (mount unit failed); refusing to load a half-set-up driver"
+  done
+  log "all three /usr overlays mounted"
+fi
 
 # ---------- /etc config (every boot, no-clobber reflink) ----------
 if [ -d "$CUR/etc" ]; then
