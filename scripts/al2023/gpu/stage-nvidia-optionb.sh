@@ -162,6 +162,19 @@ dl_closure "$PB" "$B/dl/pb" "$B/kmod/pb"
 # EKS's rule: an RPM present with the SAME filename (NEVRA) in both closures is shared and installed
 # natively; anything else is version-specific and unpacked into the tree. We also always treat the
 # nvidia kmod DKMS source packages as build-only (never shared, never staged).
+# -------- 1b. signatures: every downloaded AL/NVIDIA RPM must verify before anything is unpacked --------
+# Option B/C unpack the version-specific RPMs (rpm2cpio) and register them with --nodigest --nosignature, so
+# nothing else in this path checks signatures. Same rule as Option A's stage-nvidia-pb.sh.
+step "1b rpm -K every downloaded RPM"
+for key in $(sed -n 's/^gpgkey=//p' /etc/yum.repos.d/amazonlinux.repo /etc/yum.repos.d/amazonlinux-nvidia.repo 2>/dev/null | tr ' ' '\n' | sort -u); do
+    sudo rpm --import "${key#file://}" || die "cannot import signing key $key"
+done
+mapfile -d '' ALL_RPMS < <(find "$B" -name '*.rpm' -print0)
+[ ${#ALL_RPMS[@]} -gt 0 ] || die "no downloaded RPMs found under $B"
+sigs=$(rpm -K "${ALL_RPMS[@]}") || { echo "$sigs" >&2; die "signature check failed on a downloaded RPM"; }
+if grep -qv ': digests signatures OK$' <<<"$sigs"; then grep -v ': digests signatures OK$' <<<"$sigs" >&2; die "unsigned or bad-signature RPM among the downloads"; fi
+echo "GUARD signatures: OK (${#ALL_RPMS[@]} RPMs, all 'digests signatures OK')"
+
 step "2 partition shared vs version-specific"
 SHARED=$B/shared
 sudo rm -rf "$SHARED"; sudo mkdir -p "$SHARED"
