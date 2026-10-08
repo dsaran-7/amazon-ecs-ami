@@ -1,0 +1,17 @@
+# /etc/systemd/system/nvidia-ldcache-update.service (Option C)
+# The copied libraries never fire glibc's ldconfig file trigger (they're copied, not installed), so rebuild
+# the cache once the lib64 copy is done.
+[Unit]
+Description=Rebuild ld.so.cache for the copied NVIDIA libraries (Option C)
+After=nvidia-usr-copy@lib64.service
+Wants=nvidia-usr-copy@lib64.service
+Before=nvidia-cdi-refresh.service docker.service ecs.service cloud-final.service
+ConditionPathExists=/opt/nvidia/current/usr/lib64
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/sbin/ldconfig
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,20 @@
+# /etc/systemd/system/nvidia-setup.service (Option C)
+[Unit]
+Description=Commit the resolved NVIDIA driver tree (Option C, copy layout)
+Requires=nvidia-driver-resolve.service
+After=nvidia-driver-resolve.service nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service
+Wants=nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service
+Before=nvidia-persistenced.service nvidia-fabricmanager.service nvidia-mps.service
+Before=set-nvidia-clocks.service nvidia-powerd.service nvidia-gridd.service nvidia-topologyd.service
+Before=nvidia-cdi-refresh.service nvidia-dcgm.service docker.service ecs.service cloud-final.service
+ConditionPathExists=/opt/nvidia/current
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/nvidia-optionb/nvidia-setup
+TimeoutStartSec=300
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

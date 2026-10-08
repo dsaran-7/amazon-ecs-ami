@@ -55,7 +55,8 @@ build {
     "source.amazon-ebs.al2023arm",
     "source.amazon-ebs.al2023neu",
     "source.amazon-ebs.al2023gpu",
-    "source.amazon-ebs.al2023gpu-optionb"
+    "source.amazon-ebs.al2023gpu-optionb",
+    "source.amazon-ebs.al2023gpu-optionc"
   ]
 
   provisioner "file" {
@@ -215,7 +216,7 @@ build {
   provisioner "file" {
     source      = "NVIDIA_DRIVER_VERSION"
     destination = "/tmp/NVIDIA_DRIVER_VERSION"
-    only        = ["amazon-ebs.al2023gpu", "amazon-ebs.al2023gpu-optionb"]
+    only        = ["amazon-ebs.al2023gpu", "amazon-ebs.al2023gpu-optionb", "amazon-ebs.al2023gpu-optionc"]
   }
 
   provisioner "shell" {
@@ -238,7 +239,7 @@ build {
       "AIR_GAPPED=${var.air_gapped}"
     ]
     script = "scripts/al2023/gpu/install-dcgm.sh"
-    only   = ["amazon-ebs.al2023gpu", "amazon-ebs.al2023gpu-optionb"]
+    only   = ["amazon-ebs.al2023gpu", "amazon-ebs.al2023gpu-optionb", "amazon-ebs.al2023gpu-optionc"]
   }
 
   ### Dynamic NVIDIA driver *version* selection (LTS 580 + staged PB 595, swapped at boot).
@@ -284,7 +285,7 @@ build {
   provisioner "shell" {
     inline_shebang = "/bin/sh -ex"
     inline         = ["mkdir -p /tmp/nvidia-select"]
-    only           = ["amazon-ebs.al2023gpu-optionb"]
+    only           = ["amazon-ebs.al2023gpu-optionb", "amazon-ebs.al2023gpu-optionc"]
   }
 
   provisioner "file" {
@@ -300,10 +301,14 @@ build {
       "scripts/al2023/gpu/usr-bin.mount",
       "scripts/al2023/gpu/usr-lib64.mount",
       "scripts/al2023/gpu/usr-share.mount",
+      "scripts/al2023/gpu/optionc-nvidia-driver-resolve.service",
+      "scripts/al2023/gpu/optionc-nvidia-usr-copy@.service",
+      "scripts/al2023/gpu/optionc-nvidia-setup.service",
+      "scripts/al2023/gpu/optionc-nvidia-ldcache-update.service",
       "scripts/al2023/gpu/pb-required.devices"
     ]
     destination = "/tmp/nvidia-select/"
-    only        = ["amazon-ebs.al2023gpu-optionb"]
+    only        = ["amazon-ebs.al2023gpu-optionb", "amazon-ebs.al2023gpu-optionc"]
   }
 
   provisioner "shell" {
@@ -314,13 +319,14 @@ build {
       "SKIP_GRID_DRIVER_REGIONS=${local.skip_grid_driver_regions}",
       "NVIDIA_DRIVER_VERSION_FILE=/tmp/NVIDIA_DRIVER_VERSION",
       "NVIDIA_DRIVER_PB_VERSION=${var.nvidia_driver_version_al2023_pb}",
-      "NVIDIA_SELECT_SRC=/tmp/nvidia-select"
+      "NVIDIA_SELECT_SRC=/tmp/nvidia-select",
+      "NVIDIA_OPTIONB_LAYOUT=${source.name == "al2023gpu-optionc" ? "copy" : "overlay"}"
     ]
     scripts = [
       "scripts/al2023/gpu/stage-nvidia-optionb.sh",
       "scripts/al2023/gpu/enable-ecs-agent-gpu-support-al2023.sh"
     ]
-    only = ["amazon-ebs.al2023gpu-optionb"]
+    only = ["amazon-ebs.al2023gpu-optionb", "amazon-ebs.al2023gpu-optionc"]
   }
 
   provisioner "shell" {

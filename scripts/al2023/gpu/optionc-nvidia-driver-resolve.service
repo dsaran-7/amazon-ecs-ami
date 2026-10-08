@@ -1,0 +1,25 @@
+# /etc/systemd/system/nvidia-driver-resolve.service (Option C: EKS-current copy layout)
+# Option C copies the chosen tree into /usr (nvidia-usr-copy@) instead of overlay-mounting it. With no mount
+# units, resolve no longer has to finish before local-fs.target, so it runs after cloud-init.service and can
+# honor the customer override (/etc/ecs/nvidia-driver-select.override, written by cloud-config write_files)
+# in the same boot, with no reboot. Default dependencies are kept; the build's systemd-analyze guard checks
+# that this ordering forms no cycle.
+[Unit]
+Description=Resolve NVIDIA driver branch+flavor for attached GPUs (Option C, copy layout)
+After=cloud-init.service
+Before=nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service
+Before=nvidia-setup.service nvidia-ldcache-update.service
+Before=nvidia-persistenced.service nvidia-fabricmanager.service nvidia-mps.service
+Before=set-nvidia-clocks.service nvidia-powerd.service nvidia-gridd.service nvidia-topologyd.service
+Before=nvidia-cdi-refresh.service nvidia-dcgm.service docker.service ecs.service cloud-final.service
+ConditionPathExists=/etc/ecs/nvidia-driver-select/optionb-branches
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/nvidia-optionb/nvidia-driver-resolve
+TimeoutStartSec=120
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

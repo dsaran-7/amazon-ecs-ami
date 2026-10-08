@@ -30,10 +30,13 @@
 #
 # Only runs for the al2023gpu-optionb source. No-op otherwise.
 set -Eeuo pipefail
+# overlay (Option B, default) or copy (Option C, EKS-current reflink-copy into /usr). Set by Packer.
+LAYOUT="${NVIDIA_OPTIONB_LAYOUT:-overlay}"
+case "$LAYOUT" in overlay | copy) ;; *) echo "bad NVIDIA_OPTIONB_LAYOUT=$LAYOUT" >&2; exit 1 ;; esac
 
 # Only proceed for the Option B GPU AMI source.
-if [[ ${AMI_TYPE:-} != "al2023gpu-optionb" ]]; then
-    echo "stage-nvidia-optionb: AMI_TYPE='${AMI_TYPE:-}' is not al2023gpu-optionb; skipping"
+if [[ ${AMI_TYPE:-} != "al2023gpu-optionb" && ${AMI_TYPE:-} != "al2023gpu-optionc" ]]; then
+    echo "stage-nvidia-optionb: AMI_TYPE='${AMI_TYPE:-}' is not al2023gpu-optionb or -optionc; skipping"
     exit 0
 fi
 
@@ -319,34 +322,59 @@ printf 'LTS_VERSION=%s\nPB_VERSION=%s\n' "$LTS" "$PB" | sudo tee "$CONF/optionb-
 # Keep the PCI-device provenance file alongside, for cross-referencing with Option A.
 sudo cp "$SRC/pb-required.devices" "$CONF/" 2>/dev/null || true
 
-sudo install -D -m0755 "$SRC/nvidia-driver-resolve.sh" /usr/libexec/nvidia-optionb/nvidia-driver-resolve
-sudo install -D -m0755 "$SRC/nvidia-setup.sh" /usr/libexec/nvidia-optionb/nvidia-setup
-sudo install -D -m0755 "$SRC/nvidia-override-apply.sh" /usr/libexec/nvidia-optionb/nvidia-override-apply
-sudo install -D -m0644 "$SRC/nvidia-driver-resolve.service" /etc/systemd/system/nvidia-driver-resolve.service
-sudo install -D -m0644 "$SRC/nvidia-setup.service" /etc/systemd/system/nvidia-setup.service
-sudo install -D -m0644 "$SRC/nvidia-ldcache-update.service" /etc/systemd/system/nvidia-ldcache-update.service
-sudo install -D -m0644 "$SRC/nvidia-override-apply.service" /etc/systemd/system/nvidia-override-apply.service
-for m in usr-bin usr-lib64 usr-share; do
-    sudo install -D -m0644 "$SRC/$m.mount" "/etc/systemd/system/$m.mount"
-done
-# Upperdir/workdir roots for the three overlays (ECS path, mirrors EKS /var/lib/eks/nvidia).
-sudo mkdir -p /var/lib/ecs/nvidia/{bin,lib64,share}/{upper,work}
+if [ "$LAYOUT" = copy ]; then
+    # Option C: copy layout. No mount units and no nvidia-override-apply: resolve runs after cloud-init and
+    # applies the override itself.
+    printf 'copy\n' | sudo tee "$CONF/optionb-layout" >/dev/null
+    sudo install -D -m0755 "$SRC/nvidia-driver-resolve.sh" /usr/libexec/nvidia-optionb/nvidia-driver-resolve
+    sudo install -D -m0755 "$SRC/nvidia-setup.sh" /usr/libexec/nvidia-optionb/nvidia-setup
+    for u in nvidia-driver-resolve.service nvidia-setup.service nvidia-ldcache-update.service nvidia-usr-copy@.service; do
+        sudo install -D -m0644 "$SRC/optionc-$u" "/etc/systemd/system/$u"
+    done
+    sudo systemctl daemon-reload
+    sudo systemctl enable nvidia-driver-resolve.service nvidia-setup.service nvidia-ldcache-update.service \
+        nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service
 
-sudo systemctl daemon-reload
-sudo systemctl enable nvidia-driver-resolve.service nvidia-setup.service nvidia-ldcache-update.service nvidia-override-apply.service
-sudo systemctl enable usr-bin.mount usr-lib64.mount usr-share.mount
+    # Same guard as Option B: moving resolve after cloud-init must not form an ordering cycle.
+    verify_out=$(sudo systemd-analyze verify --man=no default.target nvidia-driver-resolve.service \
+        nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service \
+        nvidia-setup.service nvidia-ldcache-update.service 2>&1 || true)
+    if grep -qi 'ordering cycle' <<<"$verify_out"; then
+        echo "$verify_out" >&2
+        die "Option C boot units form a systemd ordering cycle"
+    fi
+    echo "GUARD boot units: OK (no ordering cycle in systemd-analyze verify; layout=copy)"
+else
+    printf 'overlay\n' | sudo tee "$CONF/optionb-layout" >/dev/null
+    sudo install -D -m0755 "$SRC/nvidia-driver-resolve.sh" /usr/libexec/nvidia-optionb/nvidia-driver-resolve
+    sudo install -D -m0755 "$SRC/nvidia-setup.sh" /usr/libexec/nvidia-optionb/nvidia-setup
+    sudo install -D -m0755 "$SRC/nvidia-override-apply.sh" /usr/libexec/nvidia-optionb/nvidia-override-apply
+    sudo install -D -m0644 "$SRC/nvidia-driver-resolve.service" /etc/systemd/system/nvidia-driver-resolve.service
+    sudo install -D -m0644 "$SRC/nvidia-setup.service" /etc/systemd/system/nvidia-setup.service
+    sudo install -D -m0644 "$SRC/nvidia-ldcache-update.service" /etc/systemd/system/nvidia-ldcache-update.service
+    sudo install -D -m0644 "$SRC/nvidia-override-apply.service" /etc/systemd/system/nvidia-override-apply.service
+    for m in usr-bin usr-lib64 usr-share; do
+        sudo install -D -m0644 "$SRC/$m.mount" "/etc/systemd/system/$m.mount"
+    done
+    # Upperdir/workdir roots for the three overlays (ECS path, mirrors EKS /var/lib/eks/nvidia).
+    sudo mkdir -p /var/lib/ecs/nvidia/{bin,lib64,share}/{upper,work}
 
-# Guard: the boot units must not form a systemd ordering cycle. systemd "resolves" a cycle at boot by
-# deleting a job on the loop, sometimes nvidia-driver-resolve itself (GPU-less host). Simulate the boot
-# transaction now and fail the build instead. Only "ordering cycle" lines fail; other verify warnings
-# (unrelated stock units) are logged but tolerated.
-verify_out=$(sudo systemd-analyze verify --man=no default.target nvidia-driver-resolve.service \
-    usr-bin.mount usr-lib64.mount usr-share.mount nvidia-setup.service nvidia-ldcache-update.service nvidia-override-apply.service 2>&1 || true)
-if grep -qi 'ordering cycle' <<<"$verify_out"; then
-    echo "$verify_out" >&2
-    die "Option B boot units form a systemd ordering cycle"
+    sudo systemctl daemon-reload
+    sudo systemctl enable nvidia-driver-resolve.service nvidia-setup.service nvidia-ldcache-update.service nvidia-override-apply.service
+    sudo systemctl enable usr-bin.mount usr-lib64.mount usr-share.mount
+
+    # Guard: the boot units must not form a systemd ordering cycle. systemd "resolves" a cycle at boot by
+    # deleting a job on the loop, sometimes nvidia-driver-resolve itself (GPU-less host). Simulate the boot
+    # transaction now and fail the build instead. Only "ordering cycle" lines fail; other verify warnings
+    # (unrelated stock units) are logged but tolerated.
+    verify_out=$(sudo systemd-analyze verify --man=no default.target nvidia-driver-resolve.service \
+        usr-bin.mount usr-lib64.mount usr-share.mount nvidia-setup.service nvidia-ldcache-update.service nvidia-override-apply.service 2>&1 || true)
+    if grep -qi 'ordering cycle' <<<"$verify_out"; then
+        echo "$verify_out" >&2
+        die "Option B boot units form a systemd ordering cycle"
+    fi
+    echo "GUARD boot units: OK (no ordering cycle in systemd-analyze verify)"
 fi
-echo "GUARD boot units: OK (no ordering cycle in systemd-analyze verify)"
 
 # -------- 7. sizes + cleanup --------
 step "7 sizes + cleanup"

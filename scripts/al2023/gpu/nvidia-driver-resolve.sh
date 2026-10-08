@@ -15,6 +15,7 @@ set -Eeuo pipefail
 shopt -s nullglob
 
 CONF=/etc/ecs/nvidia-driver-select
+OVR=/etc/ecs/nvidia-driver-select.override
 NV=/opt/nvidia
 RUN=/run/nvidia-optionb
 STATE=/var/lib/nvidia-optionb
@@ -27,6 +28,9 @@ mkdir -p "$RUN" "$STATE"
 [ -r "$CONF/optionb-branches" ] || die "$CONF/optionb-branches missing"
 . "$CONF/optionb-branches"
 [ -n "${LTS_VERSION:-}" ] && [ -n "${PB_VERSION:-}" ] || die "optionb-branches incomplete"
+# overlay = Option B (tree overlaid on /usr, resolve before local-fs); copy = Option C (tree copied into
+# /usr, resolve after cloud-init). Written at build by stage-nvidia-optionb.sh.
+LAYOUT=$(cat "$CONF/optionb-layout" 2>/dev/null || echo overlay)
 
 # ---------- after an override switch: start the new tree with empty overlay upper layers ----------
 # nvidia-override-apply re-pointed the tree and rebooted. Anything written through the overlays while the
@@ -99,6 +103,27 @@ fi
 if [ "$branch" = pb ] && [ "$flavor" != open ]; then
   log "WARNING: PB resolved but flavor=$flavor (PB tree is open-only); falling back to LTS $LTS_VERSION"
   branch=lts; version=$LTS_VERSION; TREE="$NV/lts"; reason="PB has no $flavor flavor; LTS-first"
+fi
+# ---------- customer override (Option C only) ----------
+# Option C resolves after cloud-init, so a cloud-config write_files override already exists and applies in this
+# boot. Same contract and validation as Option A and Option B's nvidia-override-apply: pb is rejected when the
+# GPU needs the GRID or proprietary flavor (the PB tree is open-only); lts on a PB-required family is accepted
+# with an UNQUALIFIED warning. Option B can't do this here: it resolves before cloud-init has run.
+if [ "$LAYOUT" = copy ] && [ -r "$OVR" ]; then
+  req=$(sed -n 's/^NVIDIA_DRIVER_BRANCH=//p' "$OVR" | tail -1 | tr -d '[:space:]')
+  case "$req" in
+    auto | "") log "override: none (auto)" ;;
+    lts)
+      [ "$branch" = pb ] && log "WARNING: UNQUALIFIED configuration: override lts accepted on ${FAMILY:-unknown} (PB-required family)"
+      branch=lts; version=$LTS_VERSION; TREE="$NV/lts"; reason="customer override lts" ;;
+    pb)
+      if [ "$flavor" != open ]; then
+        log "WARNING: override NVIDIA_DRIVER_BRANCH=pb rejected (GPU needs the $flavor flavor; PB tree is open-only); keeping $branch"
+      else
+        branch=pb; version=$PB_VERSION; TREE="$NV/pb"; reason="customer override pb"
+      fi ;;
+    *) log "WARNING: ignoring invalid NVIDIA_DRIVER_BRANCH=$req" ;;
+  esac
 fi
 [ -d "$TREE/flavors/$flavor" ] || die "tree $TREE has no $flavor flavor built"
 

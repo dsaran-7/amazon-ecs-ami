@@ -1,0 +1,21 @@
+# /etc/systemd/system/nvidia-usr-copy@.service (Option C), instances: bin, lib64, share
+# Reflink-copies the resolved tree's usr/%i into /usr/%i once, as EKS's current AMI does
+# (amazon-eks-ami templates/al2023/runtime/gpu/nvidia-usr-copy@.service). Replaces Option B's overlay mounts.
+# The sentinel lives in /var/lib/nvidia-optionb, so a later boot skips the copy.
+[Unit]
+Description=Copy NVIDIA driver files into /usr/%i (Option C)
+Requires=nvidia-driver-resolve.service
+After=nvidia-driver-resolve.service
+Before=nvidia-setup.service nvidia-ldcache-update.service
+ConditionPathExists=/opt/nvidia/current/usr/%i
+ConditionPathExists=!/var/lib/nvidia-optionb/.usr-%i-copied
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/bash -c 'shopt -s dotglob; cp -a --reflink=auto /opt/nvidia/current/usr/%i/. /usr/%i/'
+ExecStartPost=/usr/bin/bash -c 'mkdir -p /var/lib/nvidia-optionb && touch /var/lib/nvidia-optionb/.usr-%i-copied'
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
