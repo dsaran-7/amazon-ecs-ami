@@ -356,6 +356,25 @@ if [ "$LAYOUT" = copy ]; then
         die "Option C boot units form a systemd ordering cycle"
     fi
     echo "GUARD boot units: OK (no ordering cycle in systemd-analyze verify; layout=copy)"
+
+    # Prebuilt module index (copy layout). depmod on a fresh instance spent 25-30 s, mostly reading every
+    # module from a volume EBS restores lazily. Build the index per tree/flavor here, against this exact
+    # kernel module set; nvidia-setup uses it only if the module set at boot matches the manifest.
+    for flav in "$NV"/lts/flavors/* "$NV"/pb/flavors/*; do
+        [ -d "$flav/lib/modules/$K/extra" ] || continue
+        st=$(sudo mktemp -d "$NV/.depmod-stage.XXXX"); sudo chmod 755 "$st"
+        sudo mkdir -p "$st/lib/modules"
+        sudo cp -al "/lib/modules/$K" "$st/lib/modules/$K"
+        sudo mkdir -p "$st/lib/modules/$K/extra"
+        sudo cp -al --remove-destination "$flav/lib/modules/$K/extra/." "$st/lib/modules/$K/extra/"
+        sudo depmod -b "$st" "$K" || die "depmod -b failed for $flav"
+        sudo rm -rf "$flav/depmod"; sudo mkdir -p "$flav/depmod"
+        sudo cp -a "$st/lib/modules/$K"/modules.* "$flav/depmod/"
+        (cd "$st/lib/modules/$K" && sudo find . -name '*.ko*' -printf '%P %s\n' | LC_ALL=C sort | sha256sum | cut -d' ' -f1) \
+            | sudo tee "$flav/depmod/manifest" >/dev/null
+        sudo rm -rf "$st"
+        echo "module index for ${flav#$NV/}: $(ls "$flav/depmod" | wc -l) files, manifest $(cut -c1-12 "$flav/depmod/manifest")"
+    done
 else
     printf 'overlay\n' | sudo tee "$CONF/optionb-layout" >/dev/null
     sudo install -D -m0755 "$SRC/nvidia-driver-resolve.sh" /usr/libexec/nvidia-optionb/nvidia-driver-resolve

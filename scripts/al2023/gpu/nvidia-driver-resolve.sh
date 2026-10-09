@@ -45,6 +45,22 @@ fi
 # EKS resolves on first boot and keeps the result; the other tree may even be deleted. We keep both
 # trees (so a reboot is a true no-op and we can measure it), but we DO honor resolve-once semantics:
 # once committed, we do not flip the symlink. nvidia-setup's own .driver-committed gates the heavy work.
+# ---------- instance-type change (Option C only) ----------
+# Resolve-once keeps the first tree. In the copy layout that strands an instance restarted as a different
+# family (a G7 restarted as a P3 would keep 595). If the instance type differs from the one we resolved for,
+# drop the resolve marker so the normal path below runs; if it then picks a different tree or flavor, the old
+# tree is cleaned out of /usr, /lib/modules and the rpmdb before the new one is copied in.
+OLD_TREE=; OLD_FLAVOR=
+if [ "$LAYOUT" = copy ] && [ -L "$NV/current" ] && [ -e "$STATE/.resolved" ] && [ -s "$STATE/.resolved-itype" ]; then
+  now=$(tr -d '[:space:]' </sys/devices/virtual/dmi/id/product_name 2>/dev/null || true)
+  was=$(cat "$STATE/.resolved-itype")
+  if [ -n "$now" ] && [ "$now" != "$was" ]; then
+    OLD_TREE=$(readlink "$NV/current"); OLD_FLAVOR=$(cat "$NV/current/.driver-flavor" 2>/dev/null || echo open)
+    log "instance type changed ($was -> $now); re-resolving (was $(basename "$OLD_TREE")/$OLD_FLAVOR)"
+    rm -f "$STATE/.resolved"
+  fi
+fi
+
 if [ -L "$NV/current" ] && [ -e "$STATE/.resolved" ]; then
   # $RUN is tmpfs, so re-derive $RUN/resolved from the kept symlink. nvidia-setup reads it on any boot
   # before its first commit, which includes the boot right after an nvidia-override-apply switch.
@@ -127,10 +143,32 @@ if [ "$LAYOUT" = copy ] && [ -r "$OVR" ]; then
 fi
 [ -d "$TREE/flavors/$flavor" ] || die "tree $TREE has no $flavor flavor built"
 
+# ---------- after a type change: clean out the old tree if the choice changed ----------
+if [ -n "$OLD_TREE" ]; then
+  if [ "$OLD_TREE" = "$TREE" ] && [ "$OLD_FLAVOR" = "$flavor" ]; then
+    log "re-resolve kept $(basename "$TREE")/$flavor; nothing to clean"
+  else
+    for d in bin lib64 share; do
+      [ -d "$OLD_TREE/usr/$d" ] || continue
+      (cd "$OLD_TREE/usr/$d" && find . ! -type d -print0) | (cd "/usr/$d" && xargs -0 -r rm -f --)
+      rm -f "$STATE/.usr-$d-copied"
+    done
+    for f in "$OLD_TREE/flavors/$OLD_FLAVOR/lib/modules/$(uname -r)/extra"/*; do rm -f "/lib/modules/$(uname -r)/extra/$(basename "$f")"; done
+    olds=()
+    for r in "$OLD_TREE"/.rpms/*.rpm "$OLD_TREE/flavors/$OLD_FLAVOR"/.rpms/*.rpm; do
+      [ -e "$r" ] && olds+=("$(rpm -qp --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}' "$r" 2>/dev/null)")
+    done
+    [ ${#olds[@]} -gt 0 ] && rpm -e --justdb --nodeps --noscripts --notriggers "${olds[@]}" 2>/dev/null || true
+    rm -f "$STATE/.driver-committed" "$STATE/.fallback-attempted"
+    log "cleaned $(basename "$OLD_TREE")/$OLD_FLAVOR out of /usr, /lib/modules and the rpmdb (${#olds[@]} packages)"
+  fi
+fi
+
 # ---------- commit the symlink + sentinel ----------
 ln -sfn "$TREE" "$NV/current"
 printf '%s\n' "$flavor" >"$NV/current/.driver-flavor"
 printf 'branch=%s\nversion=%s\nflavor=%s\ntree=%s\ninstance_type=%s\n' \
   "$branch" "$version" "$flavor" "$TREE" "${ITYPE:-unknown}" >"$RUN/resolved"
 touch "$STATE/.resolved"
+[ -n "${ITYPE:-}" ] && printf '%s\n' "$ITYPE" >"$STATE/.resolved-itype"
 log "resolved -> $branch/$version flavor=$flavor ($reason); /opt/nvidia/current -> $TREE in $(el) ms"

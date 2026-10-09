@@ -79,6 +79,10 @@ try_fallback() {
   . /etc/ecs/nvidia-driver-select/optionb-branches
   log "WARNING: UNQUALIFIED configuration: PB setup failed ($1); falling back to LTS $LTS_VERSION"
   for m in nvidia_uvm nvidia_drm nvidia_modeset nvidia; do rmmod "$m" 2>/dev/null || true; done
+  if [ -e /sys/module/nvidia ]; then
+    log "fallback: nvidia $(cat /sys/module/nvidia/version 2>/dev/null) is still loaded and cannot be unloaded; not falling back"
+    return 0
+  fi
   local d f
   for d in bin lib64 share; do
     [ -d "$NV/pb/usr/$d" ] || continue
@@ -135,6 +139,14 @@ FW_DST="/lib/firmware"
 
 # ---------- modules + firmware (first boot only) + depmod ----------
 if [ ! -e "$COMMITTED" ]; then
+  # An earlier first-boot attempt that was interrupted (power loss, hard reset) can leave its modules and
+  # module index in place, and udev then autoloads that nvidia module before this unit runs. Unload it, so
+  # the version loaded below is the one committed now.
+  if [ "$LAYOUT" = copy ] && [ -e /sys/module/nvidia ]; then
+    log "nvidia $(cat /sys/module/nvidia/version 2>/dev/null) already loaded before commit (interrupted earlier attempt); unloading"
+    for m in nvidia_uvm nvidia_drm nvidia_modeset nvidia; do rmmod "$m" 2>/dev/null || true; done
+    [ ! -e /sys/module/nvidia ] || die "cannot unload the nvidia module left by an interrupted attempt"
+  fi
   mkdir -p "$EXTRA_DST"
   if [ -d "$FLAVOR_SUBTREE/lib/modules/$K/extra" ]; then
     cp -a --reflink=auto "$FLAVOR_SUBTREE/lib/modules/$K/extra/." "$EXTRA_DST/" \
@@ -148,7 +160,7 @@ if [ ! -e "$COMMITTED" ]; then
   # dir, so FW_DST=/lib/firmware writes to /usr/lib/firmware where the kernel loader looks.
   for fwsrc in "$CUR"/usr/lib/firmware "$FLAVOR_SUBTREE"/usr/lib/firmware; do
     [ -d "$fwsrc" ] || continue
-    cp -a --reflink=auto "$fwsrc/." "$FW_DST/" || die "copying firmware from $fwsrc failed (disk full?)"
+    err=$(cp -a --reflink=auto "$fwsrc/." "$FW_DST/" 2>&1) || die "copying firmware from $fwsrc failed: $(head -c 300 <<<"$err")"
   done
   # Fail loudly if the resolved flavor needs GSP firmware but the resolved version's blobs did not land
   # (the exact silent bug: module loads, RmInitAdapter fails "No firmware image found", nvidia-smi shows
@@ -161,8 +173,17 @@ if [ ! -e "$COMMITTED" ]; then
         || die "no GSP firmware for $VER at $FW_DST/nvidia/$VER (flavor=$FLAVOR); GPU init would fail"
       ;;
   esac
-  depmod "$K" || die "depmod failed"
-  log "depmod done"
+  # Option C: use the build-time module index when this instance's module set is exactly the one it was
+  # built for (same files, same sizes); otherwise fall back to depmod. Only directory metadata is read.
+  IDX="$FLAVOR_SUBTREE/depmod"
+  if [ "$LAYOUT" = copy ] && [ -s "$IDX/manifest" ] && \
+     [ "$(cd "$LIB_MODULES" && find . -name '*.ko*' -printf '%P %s\n' | LC_ALL=C sort | sha256sum | cut -d' ' -f1)" = "$(cat "$IDX/manifest")" ]; then
+    cp -a "$IDX"/modules.* "$LIB_MODULES/" || die "copying the prebuilt module index failed (disk full?)"
+    log "prebuilt module index copied (depmod skipped)"
+  else
+    depmod "$K" || die "depmod failed"
+    log "depmod done"
+  fi
 fi
 
 # ---------- module load (every boot) ----------
@@ -177,6 +198,10 @@ done
 /usr/bin/nvidia-modprobe -c 0 -u 2>/dev/null || true
 loaded=$(cat /sys/module/nvidia/version 2>/dev/null || true)
 [ -n "$loaded" ] || die "nvidia module not loaded after modprobe"
+want=$(sed -n 's/^version=//p' "$RUN/resolved" 2>/dev/null || true)
+if [ "$LAYOUT" = copy ] && [ -n "$want" ] && [ "$loaded" != "$want" ]; then
+  die "loaded nvidia $loaded but the committed tree is $want (kernel/user-space mismatch)"
+fi
 LOADED_OK=1
 log "nvidia $loaded loaded ($(modinfo -F filename nvidia 2>/dev/null))"
 
