@@ -62,6 +62,10 @@ log() { echo "[+$(el)ms] setup: $*"; }
 die() { log "ERROR: $*"; try_fallback "$*"; exit 1; }
 LAYOUT=$(cat /etc/ecs/nvidia-driver-select/optionb-layout 2>/dev/null || echo overlay)
 LOADED_OK=0   # set once the nvidia module is loaded; after that a failure leaves a working GPU, so no fallback
+# Option C: while a first-boot commit is in progress, only this script may load nvidia. Without this, a hard
+# reset after the modules and their index are written lets udev autoload that half-committed module on the
+# next boot, racing this script (measured: kernel 595 with 580 libraries, ECS never started).
+HOLD=/etc/modprobe.d/nvidia-optionc-commit-hold.conf
 
 # ---------- fallback to the LTS tree (Option C only) ----------
 # Option A falls back to LTS 580 when the PB swap or load fails; Option B has no fallback, and a failed setup
@@ -94,7 +98,10 @@ try_fallback() {
   printf 'branch=lts\nversion=%s\nflavor=%s\ntree=%s\nfallback=from-pb\n' "$LTS_VERSION" "${FLAVOR:-open}" "$NV/lts" >"$RUN/resolved"
   for d in bin lib64 share; do
     [ -d "$NV/lts/usr/$d" ] || continue
-    cp -a --reflink=auto "$NV/lts/usr/$d/." "/usr/$d/" || { log "fallback: copying the LTS tree into /usr/$d failed"; exit 1; }
+    # Clear the LTS tree's own paths first: an interrupted earlier attempt can leave entries there that
+    # cp can't overwrite (a symlink loop was seen after a hard reset).
+    (cd "$NV/lts/usr/$d" && find . ! -type d -print0) | (cd "/usr/$d" && xargs -0 -r rm -f --)
+    err=$(cp -a --reflink=auto "$NV/lts/usr/$d/." "/usr/$d/" 2>&1) || { log "fallback: copying the LTS tree into /usr/$d failed: $(head -c 300 <<<"$err")"; exit 1; }
   done
   /sbin/ldconfig || true
   rm -f "$COMMITTED"; sync
@@ -147,6 +154,10 @@ if [ ! -e "$COMMITTED" ]; then
     for m in nvidia_uvm nvidia_drm nvidia_modeset nvidia; do rmmod "$m" 2>/dev/null || true; done
     [ ! -e /sys/module/nvidia ] || die "cannot unload the nvidia module left by an interrupted attempt"
   fi
+  if [ "$LAYOUT" = copy ]; then
+    printf '# written by nvidia-setup during a first-boot commit; removed when it completes\ninstall nvidia /bin/false\n' >"$HOLD"
+    sync
+  fi
   mkdir -p "$EXTRA_DST"
   if [ -d "$FLAVOR_SUBTREE/lib/modules/$K/extra" ]; then
     cp -a --reflink=auto "$FLAVOR_SUBTREE/lib/modules/$K/extra/." "$EXTRA_DST/" \
@@ -189,11 +200,11 @@ fi
 # ---------- module load (every boot) ----------
 # failure mode 2: a .ko that does not match the running kernel will fail here; no DKMS to rebuild.
 load_mod() { modprobe "$1" 2>&1 | sed "s/^/  modprobe $1| /" || return 1; }
-modprobe nvidia || die "modprobe nvidia failed (kernel mismatch? Option B has no DKMS source to rebuild)"
+modprobe --ignore-install nvidia || die "modprobe nvidia failed (kernel mismatch? Option B has no DKMS source to rebuild)"
 for ko in "$EXTRA_DST"/*.ko*; do
   m=$(basename "$ko"); m="${m%%.ko*}"
   case "$m" in nvidia | nvidia-peermem) continue ;; esac   # nvidia loaded above; peermem optional (needs IB)
-  modprobe "$m" 2>/dev/null || log "note: modprobe $m skipped/failed (optional on this hardware)"
+  modprobe --ignore-install "$m" 2>/dev/null || log "note: modprobe $m skipped/failed (optional on this hardware)"
 done
 /usr/bin/nvidia-modprobe -c 0 -u 2>/dev/null || true
 loaded=$(cat /sys/module/nvidia/version 2>/dev/null || true)
@@ -250,6 +261,6 @@ if [ ! -e "$COMMITTED" ]; then
   fi
 fi
 
-touch "$COMMITTED"; sync
+touch "$COMMITTED"; rm -f "$HOLD"; sync
 echo "$(date -u +%FT%TZ) committed $(readlink "$CUR") flavor=$FLAVOR nvidia=$loaded" >>"$STATE/history"
 log "done (committed $FLAVOR $loaded) in $(el) ms"
