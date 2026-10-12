@@ -67,6 +67,22 @@ LOADED_OK=0   # set once the nvidia module is loaded; after that a failure leave
 # next boot, racing this script (measured: kernel 595 with 580 libraries, ECS never started).
 HOLD=/etc/modprobe.d/nvidia-optionc-commit-hold.conf
 
+# Unload nvidia and every module that depends on it, holders first. On failure, log what still holds it (the
+# NVIDIA daemons are ordered after this unit, so none of them should have a device open yet).
+unload_nvidia() {
+  local m h p users=
+  rm_tree() {
+    for h in /sys/module/"$1"/holders/*; do rm_tree "$(basename "$h")"; done
+    [ -e "/sys/module/$1" ] || return 0
+    err=$(rmmod "$1" 2>&1) || log "rmmod $1: $err"
+  }
+  for m in nvidia_drm nvidia_peermem nvidia_uvm nvidia_modeset nvidia; do rm_tree "$m"; done
+  [ -e /sys/module/nvidia ] || return 0
+  for p in /proc/[0-9]*; do [ -n "$(ls -l "$p/fd" 2>/dev/null | grep /dev/nvidia)" ] && users+="$(cat "$p/comm" 2>/dev/null)[${p#/proc/}] "; done
+  log "nvidia still loaded: refcnt=$(cat /sys/module/nvidia/refcnt 2>/dev/null) holders=[$(ls /sys/module/nvidia/holders 2>/dev/null | tr '\n' ' ')] users=[${users}] loaded=[$(lsmod | awk '/^nvidia/{printf "%s(%s) ", $1, $3}')]"
+  return 1
+}
+
 # ---------- fallback to the LTS tree (Option C only) ----------
 # Option A falls back to LTS 580 when the PB swap or load fails; Option B has no fallback, and a failed setup
 # leaves a host that joins ECS with no GPU (measured on G7 with a corrupted module). In the copy layout the
@@ -82,8 +98,7 @@ try_fallback() {
   touch "$STATE/.fallback-attempted"; sync
   . /etc/ecs/nvidia-driver-select/optionb-branches
   log "WARNING: UNQUALIFIED configuration: PB setup failed ($1); falling back to LTS $LTS_VERSION"
-  for m in nvidia_uvm nvidia_drm nvidia_modeset nvidia; do rmmod "$m" 2>/dev/null || true; done
-  if [ -e /sys/module/nvidia ]; then
+  if ! unload_nvidia; then
     log "fallback: nvidia $(cat /sys/module/nvidia/version 2>/dev/null) is still loaded and cannot be unloaded; not falling back"
     return 0
   fi
@@ -146,13 +161,13 @@ FW_DST="/lib/firmware"
 
 # ---------- modules + firmware (first boot only) + depmod ----------
 if [ ! -e "$COMMITTED" ]; then
-  # An earlier first-boot attempt that was interrupted (power loss, hard reset) can leave its modules and
-  # module index in place, and udev then autoloads that nvidia module before this unit runs. Unload it, so
-  # the version loaded below is the one committed now.
+  # An earlier first-boot attempt that was interrupted (power loss, hard reset), or a commit for another
+  # instance type, can leave its modules and module index in place, and udev then autoloads that nvidia module
+  # before this unit runs (nvidia-type-change-hold blocks the type-change case). Unload it, so the version
+  # loaded below is the one committed now.
   if [ "$LAYOUT" = copy ] && [ -e /sys/module/nvidia ]; then
-    log "nvidia $(cat /sys/module/nvidia/version 2>/dev/null) already loaded before commit (interrupted earlier attempt); unloading"
-    for m in nvidia_uvm nvidia_drm nvidia_modeset nvidia; do rmmod "$m" 2>/dev/null || true; done
-    [ ! -e /sys/module/nvidia ] || die "cannot unload the nvidia module left by an interrupted attempt"
+    log "nvidia $(cat /sys/module/nvidia/version 2>/dev/null) already loaded before commit (interrupted attempt or type change); unloading"
+    unload_nvidia || die "cannot unload the nvidia module loaded before this commit"
   fi
   if [ "$LAYOUT" = copy ]; then
     printf '# written by nvidia-setup during a first-boot commit; removed when it completes\ninstall nvidia /bin/false\n' >"$HOLD"

@@ -340,17 +340,20 @@ if [ "$LAYOUT" = copy ]; then
     printf 'copy\n' | sudo tee "$CONF/optionb-layout" >/dev/null
     sudo install -D -m0755 "$SRC/nvidia-driver-resolve.sh" /usr/libexec/nvidia-optionb/nvidia-driver-resolve
     sudo install -D -m0755 "$SRC/nvidia-setup.sh" /usr/libexec/nvidia-optionb/nvidia-setup
-    for u in nvidia-driver-resolve.service nvidia-setup.service nvidia-ldcache-update.service nvidia-usr-copy@.service; do
+    sudo install -D -m0755 "$SRC/nvidia-type-change-hold.sh" /usr/libexec/nvidia-optionb/nvidia-type-change-hold
+    for u in nvidia-driver-resolve.service nvidia-setup.service nvidia-ldcache-update.service nvidia-usr-copy@.service \
+             nvidia-type-change-hold.service; do
         sudo install -D -m0644 "$SRC/optionc-$u" "/etc/systemd/system/$u"
     done
     sudo systemctl daemon-reload
     sudo systemctl enable nvidia-driver-resolve.service nvidia-setup.service nvidia-ldcache-update.service \
-        nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service
+        nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service \
+        nvidia-type-change-hold.service
 
     # Same guard as Option B: moving resolve after cloud-init must not form an ordering cycle.
     verify_out=$(sudo systemd-analyze verify --man=no default.target nvidia-driver-resolve.service \
         nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service \
-        nvidia-setup.service nvidia-ldcache-update.service 2>&1 || true)
+        nvidia-setup.service nvidia-ldcache-update.service nvidia-type-change-hold.service 2>&1 || true)
     if grep -qi 'ordering cycle' <<<"$verify_out"; then
         echo "$verify_out" >&2
         die "Option C boot units form a systemd ordering cycle"

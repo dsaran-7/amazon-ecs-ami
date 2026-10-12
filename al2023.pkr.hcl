@@ -305,6 +305,8 @@ build {
       "scripts/al2023/gpu/optionc-nvidia-usr-copy@.service",
       "scripts/al2023/gpu/optionc-nvidia-setup.service",
       "scripts/al2023/gpu/optionc-nvidia-ldcache-update.service",
+      "scripts/al2023/gpu/optionc-nvidia-type-change-hold.service",
+      "scripts/al2023/gpu/nvidia-type-change-hold.sh",
       "scripts/al2023/gpu/pb-required.devices"
     ]
     destination = "/tmp/nvidia-select/"
