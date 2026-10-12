@@ -1,0 +1,19 @@
+# /etc/systemd/system/nvidia-type-change-hold.service (Option C)
+# Holds nvidia autoload at coldplug after an instance-type change, so the previous commit's module can't load
+# before nvidia-driver-resolve cleans it out. The initramfs carries no NVIDIA modules, so ordering before the
+# real root's udev trigger is early enough.
+[Unit]
+Description=Hold NVIDIA module autoload after an instance-type change (Option C)
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=systemd-udev-trigger.service systemd-modules-load.service sysinit.target
+ConditionPathExists=/var/lib/nvidia-optionb/.resolved-itype
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/nvidia-optionb/nvidia-type-change-hold
+StandardOutput=journal+console
+
+[Install]
+WantedBy=sysinit.target
