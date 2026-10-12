@@ -231,10 +231,39 @@ if [ ! -e "$COMMITTED" ]; then
   [ -e /usr/lib/systemd/system/nvidia-fabricmanager.service ] && DAEMONS+=(nvidia-fabricmanager.service)
   [ "$FLAVOR" = grid ] && DAEMONS+=(nvidia-gridd.service)
   systemctl daemon-reload
-  systemctl enable "${DAEMONS[@]}" 2>/dev/null || log "note: some daemons could not be enabled: ${DAEMONS[*]}"
-  systemctl start --no-block "${DAEMONS[@]}" 2>/dev/null || log "note: some daemons did not start (expected on hw without NVSwitch/vGPU)"
-  log "enabled+started daemon subset: ${DAEMONS[*]}"
+  # One unit per call: a single call fails as a whole when any one unit can't be enabled, which left every
+  # daemon disabled, so they ran on first boot only (measured: nvidia-gridd inactive after a reboot).
+  for u in "${DAEMONS[@]}"; do
+    err=$(systemctl enable "$u" 2>&1) || log "note: enabling $u failed: $(head -c 200 <<<"$err")"
+    systemctl start --no-block "$u" 2>/dev/null || log "note: $u did not start (expected on hw without NVSwitch/vGPU)"
+  done
+  # After a type change off a GRID host, the license daemon an earlier commit enabled must not keep starting.
+  [ "$FLAVOR" = grid ] || systemctl disable nvidia-gridd.service 2>/dev/null || true
+  log "enabled+started daemon subset: $(for u in "${DAEMONS[@]}"; do printf '%s=%s ' "${u%.service}" "$(systemctl is-enabled "$u" 2>/dev/null)"; done)"
 fi
+
+# ---------- versionlock (written with the registration) ----------
+# The version-specific packages are registered, not installed, so nothing pins them: without a lock a
+# customer's `dnf update` replaces them (measured: nvidia-fabricmanager 595 -> nvidia-fabric-manager 570).
+# Lock every registered NEVRA, plus the packages that aren't installed but must follow the committed branch.
+# Lines for any tree's package names are dropped first, so a fallback or type change re-points the lock.
+LOCK=/etc/dnf/plugins/versionlock.list
+LOCK_EXTRA=(nvidia-imex libnvidia-nscq)
+write_lock() {
+  local re tmp n
+  re=$(rpm -qp --qf '%{NAME}\n' "$NV"/{lts,pb}/.rpms/*.rpm "$NV"/{lts,pb}/flavors/*/.rpms/*.rpm 2>/dev/null |
+    sort -u | paste -sd'|' -)
+  re="${re:+$re|}$(IFS='|'; echo "${LOCK_EXTRA[*]}")"
+  tmp=$(mktemp "$LOCK.XXXXXX") || { log "WARNING: versionlock not written (mktemp failed)"; return 0; }
+  {
+    { grep -vE "^(${re})-[0-9]+:" "$LOCK" 2>/dev/null || true; } | grep -v '^# nvidia-setup' || true
+    echo "# nvidia-setup: $(basename "$(readlink "$CUR")") $loaded"
+    rpm -qp --qf '%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.*\n' "${RPMS[@]}" 2>/dev/null
+    for n in "${LOCK_EXTRA[@]}"; do echo "$n-0:$loaded-*"; done
+  } >"$tmp"
+  chmod 644 "$tmp"; mv -f "$tmp" "$LOCK"
+  log "versionlock written: ${#RPMS[@]} registered packages + ${LOCK_EXTRA[*]} at $loaded"
+}
 
 # ---------- rpmdb registration via --justdb (first boot only) ----------
 # failure mode 3: guarded by .justdb-in-progress so a power loss mid-registration self-heals.
@@ -252,6 +281,7 @@ if [ ! -e "$COMMITTED" ]; then
     if rpm -i --justdb --noscripts --nodeps --nodigest --nosignature "${RPMS[@]}" 2>&1 | sed 's/^/  rpm| /'; then
       rm -f "$JUSTDB_INPROGRESS"; sync
       log "registered ${#RPMS[@]} version-specific RPMs in the rpmdb (--justdb; rpmdb now reports them installed)"
+      write_lock || log "WARNING: versionlock not written"
     else
       # justdb touches only the database, never files -- the committed userspace is intact. Fail loudly
       # so the state is visible, but the GPU is already usable (modules loaded, libs overlaid).
