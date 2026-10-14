@@ -1,0 +1,20 @@
+# /etc/systemd/system/nvidia-override-late.service (Option C, lean build)
+# Applies a customer override in the same boot when it differs from the tree chosen before cloud-init. Ordered
+# before the driver's consumers, so they start on the final driver. Skipped when there's no override file.
+[Unit]
+Description=Apply the NVIDIA driver-branch override after cloud-init (Option C, lean)
+After=cloud-init.service nvidia-setup.service nvidia-package-register.service
+Before=nvidia-persistenced.service nvidia-fabricmanager.service nvidia-mps.service nvidia-gridd.service
+Before=set-nvidia-clocks.service nvidia-powerd.service nvidia-topologyd.service nvidia-cdi-refresh.service
+Before=nvidia-dcgm.service docker.service ecs.service cloud-final.service
+ConditionPathExists=/etc/ecs/nvidia-driver-select.override
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/nvidia-optionb/nvidia-override-late
+TimeoutStartSec=300
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

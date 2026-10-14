@@ -351,14 +351,17 @@ if [ "$LAYOUT" = copy ]; then
         sudo install -D -m0644 "$SRC/optionc-lean-nvidia-driver-resolve.service" /etc/systemd/system/nvidia-driver-resolve.service
         sudo install -D -m0644 "$SRC/optionc-lean-nvidia-usr-copy@.service" /etc/systemd/system/nvidia-usr-copy@.service
         sudo install -D -m0644 "$SRC/optionc-nvidia-package-register.service" /etc/systemd/system/nvidia-package-register.service
+        sudo install -D -m0644 "$SRC/optionc-nvidia-override-late.service" /etc/systemd/system/nvidia-override-late.service
+        sudo install -D -m0755 "$SRC/nvidia-override-late.sh" /usr/libexec/nvidia-optionb/nvidia-override-late
         sudo touch "$CONF/optionc-lean"
-        REGISTER_UNIT=nvidia-package-register.service
+        REGISTER_UNIT="nvidia-package-register.service nvidia-override-late.service"
         echo "lean build: resolve and copy before cloud-init; package records after the driver is up"
     fi
     sudo systemctl daemon-reload
     sudo systemctl enable nvidia-driver-resolve.service nvidia-setup.service nvidia-ldcache-update.service \
         nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service \
         nvidia-type-change-hold.service
+    [ -e "$CONF/optionc-lean" ] && sudo systemctl enable nvidia-override-late.service
 
     # Same guard as Option B: moving resolve after cloud-init must not form an ordering cycle.
     verify_out=$(sudo systemd-analyze verify --man=no default.target nvidia-driver-resolve.service \

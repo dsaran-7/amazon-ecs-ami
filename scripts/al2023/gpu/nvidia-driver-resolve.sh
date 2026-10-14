@@ -61,6 +61,18 @@ if [ "$LAYOUT" = copy ] && [ -L "$NV/current" ] && [ -e "$STATE/.resolved" ] && 
   fi
 fi
 
+# ---------- late override check (lean build) ----------
+# The lean build resolves before cloud-init, so a customer override in user data isn't visible yet. nvidia-
+# override-late runs this with --late after cloud-init: re-resolve with the override and, if the choice changes,
+# clean the old tree out (the same cleanup as a type change) and leave $RUN/late-switch for the caller.
+LATE=0
+if [ "${1:-}" = --late ]; then
+  LATE=1
+  [ -L "$NV/current" ] && [ -e "$STATE/.resolved" ] || { log "late: nothing resolved yet"; exit 0; }
+  OLD_TREE=$(readlink "$NV/current"); OLD_FLAVOR=$(cat "$NV/current/.driver-flavor" 2>/dev/null || echo open)
+  rm -f "$STATE/.resolved"
+fi
+
 if [ -L "$NV/current" ] && [ -e "$STATE/.resolved" ]; then
   # $RUN is tmpfs, so re-derive $RUN/resolved from the kept symlink. nvidia-setup reads it on any boot
   # before its first commit, which includes the boot right after an nvidia-override-apply switch.
@@ -161,6 +173,7 @@ if [ -n "$OLD_TREE" ]; then
     [ ${#olds[@]} -gt 0 ] && rpm -e --justdb --nodeps --noscripts --notriggers "${olds[@]}" 2>/dev/null || true
     rm -f "$STATE/.driver-committed" "$STATE/.fallback-attempted" "$STATE/.packages-registered"
     log "cleaned $(basename "$OLD_TREE")/$OLD_FLAVOR out of /usr, /lib/modules and the rpmdb (${#olds[@]} packages)"
+    [ "$LATE" = 1 ] && : >"$RUN/late-switch"
   fi
 fi
 
