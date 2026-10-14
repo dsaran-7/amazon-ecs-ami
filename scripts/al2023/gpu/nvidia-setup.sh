@@ -132,6 +132,68 @@ if [ -e "$RUN/override-reboot-pending" ]; then log "reboot pending to apply the 
 FLAVOR=$(cat "$CUR/.driver-flavor" 2>/dev/null || echo open)
 FLAVOR_SUBTREE="$CUR/flavors/$FLAVOR"
 [ -d "$FLAVOR_SUBTREE" ] || die "flavor subtree $FLAVOR_SUBTREE missing"
+REGISTERED="$STATE/.packages-registered"
+LEAN=0; [ -e /etc/ecs/nvidia-driver-select/optionc-lean ] && LEAN=1
+# ---------- versionlock (written with the registration) ----------
+# The version-specific packages are registered, not installed, so nothing pins them: without a lock a
+# customer's `dnf update` replaces them (measured: nvidia-fabricmanager 595 -> nvidia-fabric-manager 570).
+# Lock every registered NEVRA, plus the packages that aren't installed but must follow the committed branch.
+# Lines for any tree's package names are dropped first, so a fallback or type change re-points the lock.
+LOCK=/etc/dnf/plugins/versionlock.list
+LOCK_EXTRA=(nvidia-imex libnvidia-nscq)
+write_lock() {
+  local re tmp n
+  re=$(rpm -qp --qf '%{NAME}\n' "$NV"/{lts,pb}/.rpms/*.rpm "$NV"/{lts,pb}/flavors/*/.rpms/*.rpm 2>/dev/null |
+    sort -u | paste -sd'|' -)
+  re="${re:+$re|}$(IFS='|'; echo "${LOCK_EXTRA[*]}")"
+  tmp=$(mktemp "$LOCK.XXXXXX") || { log "WARNING: versionlock not written (mktemp failed)"; return 0; }
+  {
+    { grep -vE "^(${re})-[0-9]+:" "$LOCK" 2>/dev/null || true; } | grep -v '^# nvidia-setup' || true
+    echo "# nvidia-setup: $(basename "$(readlink "$CUR")") $loaded"
+    rpm -qp --qf '%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.*\n' "${RPMS[@]}" 2>/dev/null
+    for n in "${LOCK_EXTRA[@]}"; do echo "$n-0:$loaded-*"; done
+  } >"$tmp"
+  chmod 644 "$tmp"; mv -f "$tmp" "$LOCK"
+  log "versionlock written: ${#RPMS[@]} registered packages + ${LOCK_EXTRA[*]} at $loaded"
+}
+
+# ---------- rpmdb registration via --justdb ----------
+# failure mode 3: guarded by .justdb-in-progress so a power loss mid-registration self-heals.
+register_packages() {
+  RPMS=("$CUR"/.rpms/*.rpm "$FLAVOR_SUBTREE"/.rpms/*.rpm)
+  if [ ${#RPMS[@]} -gt 0 ]; then
+    # Recover a prior interrupted registration: drop any of these NEVRAs already in the rpmdb, then re-add.
+    if [ -e "$JUSTDB_INPROGRESS" ]; then
+      log "recovering from an interrupted justdb registration"
+      names=$(for r in "${RPMS[@]}"; do rpm -qp --qf '%{NAME}\n' "$r" 2>/dev/null; done | sort -u)
+      # shellcheck disable=SC2086
+      rpm -e --justdb --nodeps --noscripts --notriggers $names 2>/dev/null || true
+    fi
+    : >"$JUSTDB_INPROGRESS"; sync
+    if rpm -i --justdb --noscripts --nodeps --nodigest --nosignature "${RPMS[@]}" 2>&1 | sed 's/^/  rpm| /'; then
+      rm -f "$JUSTDB_INPROGRESS"; sync
+      log "registered ${#RPMS[@]} version-specific RPMs in the rpmdb (--justdb; rpmdb now reports them installed)"
+      write_lock || log "WARNING: versionlock not written"
+    else
+      # justdb touches only the database, never files -- the committed userspace is intact. Fail loudly
+      # so the state is visible, but the GPU is already usable (modules loaded, libs overlaid).
+      rm -f "$JUSTDB_INPROGRESS"
+      die "rpm --justdb registration failed; rpmdb left inconsistent (userspace is intact: modules loaded, libs overlaid)"
+    fi
+  fi
+  touch "$REGISTERED"; sync
+}
+
+if [ "${1:-}" = --register-only ]; then
+  LOADED_OK=1   # the driver is already up; a registration failure must not trigger the LTS fallback
+  loaded=$(cat /sys/module/nvidia/version 2>/dev/null || true)
+  [ -n "$loaded" ] || { log "register: nvidia isn't loaded yet; nothing to record"; exit 1; }
+  [ -e "$REGISTERED" ] && { log "register: already recorded"; exit 0; }
+  RPMS=("$CUR"/.rpms/*.rpm "$FLAVOR_SUBTREE"/.rpms/*.rpm)
+  register_packages
+  log "register: done in $(el) ms"
+  exit 0
+fi
 log "committing tree $(readlink "$CUR") flavor=$FLAVOR kernel=$K"
 
 # ---------- failure mode 1: verify the three overlays are actually mounted ----------
@@ -257,53 +319,13 @@ if [ ! -e "$COMMITTED" ]; then
   log "enabled+started daemon subset: $(for u in "${DAEMONS[@]}"; do printf '%s=%s ' "${u%.service}" "$(systemctl is-enabled "$u" 2>/dev/null)"; done)"
 fi
 
-# ---------- versionlock (written with the registration) ----------
-# The version-specific packages are registered, not installed, so nothing pins them: without a lock a
-# customer's `dnf update` replaces them (measured: nvidia-fabricmanager 595 -> nvidia-fabric-manager 570).
-# Lock every registered NEVRA, plus the packages that aren't installed but must follow the committed branch.
-# Lines for any tree's package names are dropped first, so a fallback or type change re-points the lock.
-LOCK=/etc/dnf/plugins/versionlock.list
-LOCK_EXTRA=(nvidia-imex libnvidia-nscq)
-write_lock() {
-  local re tmp n
-  re=$(rpm -qp --qf '%{NAME}\n' "$NV"/{lts,pb}/.rpms/*.rpm "$NV"/{lts,pb}/flavors/*/.rpms/*.rpm 2>/dev/null |
-    sort -u | paste -sd'|' -)
-  re="${re:+$re|}$(IFS='|'; echo "${LOCK_EXTRA[*]}")"
-  tmp=$(mktemp "$LOCK.XXXXXX") || { log "WARNING: versionlock not written (mktemp failed)"; return 0; }
-  {
-    { grep -vE "^(${re})-[0-9]+:" "$LOCK" 2>/dev/null || true; } | grep -v '^# nvidia-setup' || true
-    echo "# nvidia-setup: $(basename "$(readlink "$CUR")") $loaded"
-    rpm -qp --qf '%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.*\n' "${RPMS[@]}" 2>/dev/null
-    for n in "${LOCK_EXTRA[@]}"; do echo "$n-0:$loaded-*"; done
-  } >"$tmp"
-  chmod 644 "$tmp"; mv -f "$tmp" "$LOCK"
-  log "versionlock written: ${#RPMS[@]} registered packages + ${LOCK_EXTRA[*]} at $loaded"
-}
 
-# ---------- rpmdb registration via --justdb (first boot only) ----------
-# failure mode 3: guarded by .justdb-in-progress so a power loss mid-registration self-heals.
-if [ ! -e "$COMMITTED" ]; then
-  RPMS=("$CUR"/.rpms/*.rpm "$FLAVOR_SUBTREE"/.rpms/*.rpm)
-  if [ ${#RPMS[@]} -gt 0 ]; then
-    # Recover a prior interrupted registration: drop any of these NEVRAs already in the rpmdb, then re-add.
-    if [ -e "$JUSTDB_INPROGRESS" ]; then
-      log "recovering from an interrupted justdb registration"
-      names=$(for r in "${RPMS[@]}"; do rpm -qp --qf '%{NAME}\n' "$r" 2>/dev/null; done | sort -u)
-      # shellcheck disable=SC2086
-      rpm -e --justdb --nodeps --noscripts --notriggers $names 2>/dev/null || true
-    fi
-    : >"$JUSTDB_INPROGRESS"; sync
-    if rpm -i --justdb --noscripts --nodeps --nodigest --nosignature "${RPMS[@]}" 2>&1 | sed 's/^/  rpm| /'; then
-      rm -f "$JUSTDB_INPROGRESS"; sync
-      log "registered ${#RPMS[@]} version-specific RPMs in the rpmdb (--justdb; rpmdb now reports them installed)"
-      write_lock || log "WARNING: versionlock not written"
-    else
-      # justdb touches only the database, never files -- the committed userspace is intact. Fail loudly
-      # so the state is visible, but the GPU is already usable (modules loaded, libs overlaid).
-      rm -f "$JUSTDB_INPROGRESS"
-      die "rpm --justdb registration failed; rpmdb left inconsistent (userspace is intact: modules loaded, libs overlaid)"
-    fi
-  fi
+# Lean build: the package records are written by nvidia-package-register after the driver is up, off the path
+# to nvidia-smi and ECS (rpm --justdb took 11-13 s on a fresh instance). The default build writes them here.
+if [ "$LEAN" = 1 ]; then
+  [ -e "$REGISTERED" ] || { systemctl start --no-block nvidia-package-register.service; log "package records: handed to nvidia-package-register"; }
+elif [ ! -e "$COMMITTED" ]; then
+  register_packages
 fi
 
 touch "$COMMITTED"; rm -f "$HOLD"; sync

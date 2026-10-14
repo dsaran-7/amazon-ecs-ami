@@ -1,0 +1,13 @@
+# /etc/systemd/system/nvidia-package-register.service (Option C, lean build)
+# Writes the committed tree's package records (rpm --justdb) and versionlock after the driver is up, off the
+# path to nvidia-smi and ECS. nvidia-setup starts it with --no-block until the records exist.
+[Unit]
+Description=Record the committed NVIDIA driver tree in the package database (Option C, lean)
+After=nvidia-setup.service
+ConditionPathExists=!/var/lib/nvidia-optionb/.packages-registered
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/nvidia-optionb/nvidia-setup --register-only
+TimeoutStartSec=300
+StandardOutput=journal+console

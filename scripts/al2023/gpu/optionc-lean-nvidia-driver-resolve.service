@@ -1,0 +1,26 @@
+# /etc/systemd/system/nvidia-driver-resolve.service (Option C, lean build)
+# Resolves before cloud-init, right after local-fs, so the tree is copied and committed without waiting for
+# cloud-init to start (23-62 s after kernel start on a fresh instance). The cost: on an instance's first boot the
+# customer override file doesn't exist yet, so an override applies from the next boot.
+[Unit]
+Description=Resolve NVIDIA driver branch+flavor for attached GPUs (Option C, lean: before cloud-init)
+DefaultDependencies=no
+After=local-fs.target nvidia-type-change-hold.service
+Before=nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service
+Before=nvidia-setup.service nvidia-ldcache-update.service
+Before=nvidia-persistenced.service nvidia-fabricmanager.service nvidia-mps.service
+Before=set-nvidia-clocks.service nvidia-powerd.service nvidia-gridd.service nvidia-topologyd.service
+Before=nvidia-cdi-refresh.service nvidia-dcgm.service docker.service ecs.service cloud-final.service
+Before=shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=/etc/ecs/nvidia-driver-select/optionb-branches
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/nvidia-optionb/nvidia-driver-resolve
+TimeoutStartSec=120
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

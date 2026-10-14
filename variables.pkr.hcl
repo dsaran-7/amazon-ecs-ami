@@ -277,6 +277,12 @@ variable "nvidia_driver_version_al2023_pb" {
   default     = "595.91.07"
 }
 
+variable "nvidia_optionc_lean" {
+  type        = bool
+  description = "Option C only: resolve and copy the driver tree before cloud-init, and write the package records after the driver is up."
+  default     = false
+}
+
 variable "dcgm_version_al2023" {
   type        = string
   description = "DCGM major version for AL2023 GPU AMIs. Used to install the datacenter-gpu-manager-4-core package."

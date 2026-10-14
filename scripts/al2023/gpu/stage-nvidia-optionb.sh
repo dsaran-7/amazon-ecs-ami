@@ -345,6 +345,16 @@ if [ "$LAYOUT" = copy ]; then
              nvidia-type-change-hold.service; do
         sudo install -D -m0644 "$SRC/optionc-$u" "/etc/systemd/system/$u"
     done
+    # Lean build: resolve and copy before cloud-init, and package records written after the driver is up.
+    REGISTER_UNIT=
+    if [ "${NVIDIA_OPTIONC_LEAN:-false}" = true ]; then
+        sudo install -D -m0644 "$SRC/optionc-lean-nvidia-driver-resolve.service" /etc/systemd/system/nvidia-driver-resolve.service
+        sudo install -D -m0644 "$SRC/optionc-lean-nvidia-usr-copy@.service" /etc/systemd/system/nvidia-usr-copy@.service
+        sudo install -D -m0644 "$SRC/optionc-nvidia-package-register.service" /etc/systemd/system/nvidia-package-register.service
+        sudo touch "$CONF/optionc-lean"
+        REGISTER_UNIT=nvidia-package-register.service
+        echo "lean build: resolve and copy before cloud-init; package records after the driver is up"
+    fi
     sudo systemctl daemon-reload
     sudo systemctl enable nvidia-driver-resolve.service nvidia-setup.service nvidia-ldcache-update.service \
         nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service \
@@ -353,7 +363,7 @@ if [ "$LAYOUT" = copy ]; then
     # Same guard as Option B: moving resolve after cloud-init must not form an ordering cycle.
     verify_out=$(sudo systemd-analyze verify --man=no default.target nvidia-driver-resolve.service \
         nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service \
-        nvidia-setup.service nvidia-ldcache-update.service nvidia-type-change-hold.service 2>&1 || true)
+        nvidia-setup.service nvidia-ldcache-update.service nvidia-type-change-hold.service $REGISTER_UNIT 2>&1 || true)
     if grep -qi 'ordering cycle' <<<"$verify_out"; then
         echo "$verify_out" >&2
         die "Option C boot units form a systemd ordering cycle"
