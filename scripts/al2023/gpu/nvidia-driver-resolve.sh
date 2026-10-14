@@ -159,7 +159,7 @@ if [ -n "$OLD_TREE" ]; then
       [ -e "$r" ] && olds+=("$(rpm -qp --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}' "$r" 2>/dev/null)")
     done
     [ ${#olds[@]} -gt 0 ] && rpm -e --justdb --nodeps --noscripts --notriggers "${olds[@]}" 2>/dev/null || true
-    rm -f "$STATE/.driver-committed" "$STATE/.fallback-attempted"
+    rm -f "$STATE/.driver-committed" "$STATE/.fallback-attempted" "$STATE/.packages-registered"
     log "cleaned $(basename "$OLD_TREE")/$OLD_FLAVOR out of /usr, /lib/modules and the rpmdb (${#olds[@]} packages)"
   fi
 fi

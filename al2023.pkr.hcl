@@ -305,6 +305,9 @@ build {
       "scripts/al2023/gpu/optionc-nvidia-usr-copy@.service",
       "scripts/al2023/gpu/optionc-nvidia-setup.service",
       "scripts/al2023/gpu/optionc-nvidia-ldcache-update.service",
+      "scripts/al2023/gpu/optionc-lean-nvidia-driver-resolve.service",
+      "scripts/al2023/gpu/optionc-lean-nvidia-usr-copy@.service",
+      "scripts/al2023/gpu/optionc-nvidia-package-register.service",
       "scripts/al2023/gpu/optionc-nvidia-type-change-hold.service",
       "scripts/al2023/gpu/nvidia-type-change-hold.sh",
       "scripts/al2023/gpu/pb-required.devices"
@@ -322,7 +325,8 @@ build {
       "NVIDIA_DRIVER_VERSION_FILE=/tmp/NVIDIA_DRIVER_VERSION",
       "NVIDIA_DRIVER_PB_VERSION=${var.nvidia_driver_version_al2023_pb}",
       "NVIDIA_SELECT_SRC=/tmp/nvidia-select",
-      "NVIDIA_OPTIONB_LAYOUT=${source.name == "al2023gpu-optionc" ? "copy" : "overlay"}"
+      "NVIDIA_OPTIONB_LAYOUT=${source.name == "al2023gpu-optionc" ? "copy" : "overlay"}",
+      "NVIDIA_OPTIONC_LEAN=${var.nvidia_optionc_lean}"
     ]
     scripts = [
       "scripts/al2023/gpu/stage-nvidia-optionb.sh",
