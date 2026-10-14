@@ -4,6 +4,8 @@
 [Unit]
 Description=Record the committed NVIDIA driver tree in the package database (Option C, lean)
 After=nvidia-setup.service
+# Before user data: a user-data script that runs dnf must see the records and the versionlock.
+Before=cloud-final.service
 ConditionPathExists=!/var/lib/nvidia-optionb/.packages-registered
 
 [Service]
