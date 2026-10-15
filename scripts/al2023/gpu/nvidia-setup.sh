@@ -60,6 +60,20 @@ T0=$(date +%s%N)
 el() { echo $(( ($(date +%s%N) - T0) / 1000000 )); }
 log() { echo "[+$(el)ms] setup: $*"; }
 die() { log "ERROR: $*"; try_fallback "$*"; exit 1; }
+# The build stores rarely used parts of the trees compressed (the whole PB tree, and the LTS proprietary and GRID
+# modules); unpack one the first time it's chosen. Unpacked into a temporary directory and renamed into place, so a
+# reset part-way through just unpacks again on the next boot.
+ensure_unpacked() { # ensure_unpacked DIR
+  local d=$1 tmp
+  [ -d "$d" ] && return 0
+  [ -f "$d.tar.zst" ] || return 0
+  tmp="$(dirname "$d")/.unpacking-$(basename "$d")"
+  rm -rf "$tmp"; mkdir -p "$tmp"
+  log "unpacking ${d#/opt/nvidia/} ($(du -h "$d.tar.zst" | cut -f1) compressed)"
+  zstd -dcq -T0 "$d.tar.zst" | tar -C "$tmp" -xf - --xattrs || die "unpacking $d failed"
+  mv "$tmp/$(basename "$d")" "$d" || die "unpacking $d: the archive has no $(basename "$d")"
+  rmdir "$tmp"; rm -f "$d.tar.zst"; sync
+}
 LAYOUT=$(cat /etc/ecs/nvidia-driver-select/optionb-layout 2>/dev/null || echo overlay)
 LOADED_OK=0   # set once the nvidia module is loaded; after that a failure leaves a working GPU, so no fallback
 # Option C: while a first-boot commit is in progress, only this script may load nvidia. Without this, a hard
@@ -94,6 +108,7 @@ try_fallback() {
   [ -e "$STATE/.fallback-attempted" ] && return 0
   local cur; cur=$(basename "$(readlink "$CUR" 2>/dev/null)" 2>/dev/null || true)
   [ "$cur" = pb ] || return 0
+  ensure_unpacked "$NV/lts/flavors/${FLAVOR:-open}"
   [ -d "$NV/lts/flavors/${FLAVOR:-open}" ] || { log "fallback: LTS tree has no ${FLAVOR:-open} flavor; not falling back"; return 0; }
   touch "$STATE/.fallback-attempted"; sync
   . /etc/ecs/nvidia-driver-select/optionb-branches

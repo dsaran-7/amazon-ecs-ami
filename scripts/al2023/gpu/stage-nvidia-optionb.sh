@@ -435,6 +435,25 @@ if [ "$LAYOUT" = copy ]; then
         sudo rm -rf "$st"
         echo "module index for ${flav#$NV/}: $(ls "$flav/depmod" | wc -l) files, manifest $(cut -c1-12 "$flav/depmod/manifest")"
     done
+
+    # Size: store the parts most instances never use compressed; nvidia-driver-resolve unpacks one the first time
+    # it's chosen. The LTS tree's open flavor and user space, which almost every instance uses, stay unpacked, so
+    # the common path is still a reflink copy. NVIDIA_TREES_COMPRESS="" keeps everything unpacked.
+    NVIDIA_TREES_COMPRESS=${NVIDIA_TREES_COMPRESS-"pb lts/flavors/proprietary lts/flavors/grid"}
+    if [ -n "$NVIDIA_TREES_COMPRESS" ]; then
+        command -v zstd >/dev/null || sudo dnf -y install zstd >/dev/null
+        for part in $NVIDIA_TREES_COMPRESS; do
+            [ -d "$NV/$part" ] || continue
+            before=$(sudo du -sh "$NV/$part" | cut -f1)
+            sudo tar -C "$NV/$(dirname "$part")" --xattrs -cf - "$(basename "$part")" | sudo zstd -q -19 -T0 -o "$NV/$part.tar.zst" \
+                || die "compressing $part failed"
+            # Guard: the archive must unpack to the same files before the original is removed.
+            [ "$(sudo zstd -dcq "$NV/$part.tar.zst" | tar -tf - | wc -l)" = "$(cd "$NV/$(dirname "$part")" && sudo find "$(basename "$part")" | wc -l)" ] \
+                || die "archive of $part doesn't match the tree"
+            sudo rm -rf "$NV/$part"
+            echo "compressed $part: $before -> $(sudo du -sh "$NV/$part.tar.zst" | cut -f1)"
+        done
+    fi
 else
     printf 'overlay\n' | sudo tee "$CONF/optionb-layout" >/dev/null
     sudo install -D -m0755 "$SRC/nvidia-driver-resolve.sh" /usr/libexec/nvidia-optionb/nvidia-driver-resolve
@@ -478,6 +497,7 @@ for t in "$NV"/lts "$NV"/pb; do
     echo "SIZE $(basename "$t") largest files:"
     sudo find "$t" -type f -printf '%s %P\n' | sort -rn | head -15 | awk '{printf "SIZE   %7.1f MiB  %s\n", $1/1048576, $2}'
 done
+for a in "$NV"/*.tar.zst "$NV"/*/flavors/*.tar.zst; do [ -e "$a" ] && echo "SIZE compressed ${a#$NV/}: $(sudo du -sh "$a" | cut -f1)"; done
 echo "SIZE total: $(sudo du -sh "$NV" | cut -f1)"
 sudo rm -f /etc/dkms/nvidia.conf
 sudo rm -rf "$B"
