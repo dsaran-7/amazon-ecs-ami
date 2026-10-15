@@ -501,7 +501,7 @@ for t in "$NV"/lts "$NV"/pb; do
         [ -e "$t/$p" ] && echo "SIZE $(basename "$t")/$p: $(sudo du -sh "$t/$p" | cut -f1)"
     done
     echo "SIZE $(basename "$t") largest files:"
-    sudo find "$t" -type f -printf '%s %P\n' | sort -rn | head -15 | awk '{printf "SIZE   %7.1f MiB  %s\n", $1/1048576, $2}'
+    sudo find "$t" -type f -printf '%s %P\n' | sort -rn | awk 'NR<=15{printf "SIZE   %7.1f MiB  %s\n", $1/1048576, $2}'   # awk, not head: head closes the pipe and pipefail fails the build
 done
 for a in "$NV"/*.tar.zst "$NV"/*/flavors/*.tar.zst; do [ -e "$a" ] && echo "SIZE compressed ${a#$NV/}: $(sudo du -sh "$a" | cut -f1)"; done
 echo "SIZE total: $(sudo du -sh "$NV" | cut -f1)"
