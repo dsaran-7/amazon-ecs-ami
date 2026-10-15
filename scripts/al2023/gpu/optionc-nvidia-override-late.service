@@ -8,6 +8,8 @@ Before=nvidia-persistenced.service nvidia-fabricmanager.service nvidia-mps.servi
 Before=set-nvidia-clocks.service nvidia-powerd.service nvidia-topologyd.service nvidia-cdi-refresh.service
 Before=nvidia-dcgm.service docker.service ecs.service cloud-final.service
 ConditionPathExists=/etc/ecs/nvidia-driver-select.override
+# First boot only: nvidia-tree-prune removes the other tree afterwards.
+ConditionPathExists=!/var/lib/nvidia-optionb/.pruned
 
 [Service]
 Type=oneshot

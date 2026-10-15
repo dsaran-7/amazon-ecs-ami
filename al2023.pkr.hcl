@@ -310,6 +310,8 @@ build {
       "scripts/al2023/gpu/optionc-nvidia-package-register.service",
       "scripts/al2023/gpu/optionc-nvidia-override-late.service",
       "scripts/al2023/gpu/nvidia-override-late.sh",
+      "scripts/al2023/gpu/optionc-nvidia-tree-prune.service",
+      "scripts/al2023/gpu/nvidia-tree-prune.sh",
       "scripts/al2023/gpu/optionc-nvidia-type-change-hold.service",
       "scripts/al2023/gpu/nvidia-type-change-hold.sh",
       "scripts/al2023/gpu/pb-required.devices"
