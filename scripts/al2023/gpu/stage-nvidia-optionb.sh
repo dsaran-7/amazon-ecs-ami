@@ -261,6 +261,28 @@ build_grid_kmods() { # build_grid_kmods VERSION TREE   (GRID via EC2 vGPU runfil
 }
 
 # -------- 4. per-branch tree: unpack version-specific RPMs + .rpms/ for justdb --------
+# Size. <tree>/.rpms only feeds rpm --justdb at boot, which reads the package header and never the payload, so by
+# default only the lead, signature and header are kept (about 300 MiB less per tree). The PB tree is used only with
+# the open flavor (resolve sends GRID and proprietary GPUs to LTS), so by default only the open modules are built
+# for it. NVIDIA_TREES_HEADER_RPMS=0 and NVIDIA_PB_FLAVORS="open proprietary grid" restore the full trees.
+NVIDIA_TREES_HEADER_RPMS=${NVIDIA_TREES_HEADER_RPMS:-1}
+NVIDIA_PB_FLAVORS=${NVIDIA_PB_FLAVORS:-open}
+rpm_header_only() { # rpm_header_only SRC DST: the RPM's lead, signature header and main header, no payload
+    sudo python3 -c '
+import struct, sys
+src, dst = sys.argv[1:]
+data = open(src, "rb").read()
+def header_end(off):
+    if data[off:off + 3] != b"\x8e\xad\xe8":
+        sys.exit("not an RPM header at offset %d in %s" % (off, src))
+    nindex, hsize = struct.unpack(">II", data[off + 8:off + 16])
+    return off + 16 + nindex * 16 + hsize
+off = header_end(96)          # signature header, after the 96-byte lead
+off = (off + 7) // 8 * 8      # padded to 8 bytes
+off = header_end(off)         # main header; the payload starts here
+open(dst, "wb").write(data[:off])
+' "$1" "$2"
+}
 build_tree() { # build_tree VERSION TREENAME CLOSURE
     local v=$1 name=$2 closure=$3 base
     local tree="$NV/$name"
@@ -273,7 +295,7 @@ build_tree() { # build_tree VERSION TREENAME CLOSURE
         [[ -e "$SHARED/$base" ]] && continue                     # shared, installed natively
         # Unpack files into the tree (EKS: rpm2cpio | cpio -idmu), keep the .rpm for justdb.
         sudo bash -c "rpm2cpio '$rpm' | (cd '$tree' && cpio -idmu --quiet)"
-        sudo cp "$rpm" "$tree/.rpms/"
+        if [ "$NVIDIA_TREES_HEADER_RPMS" = 1 ]; then rpm_header_only "$rpm" "$tree/.rpms/$base"; else sudo cp "$rpm" "$tree/.rpms/"; fi
     done
     echo "tree '$name': $(ls "$tree/.rpms" | wc -l) version-specific RPMs unpacked + staged for justdb"
 
@@ -300,10 +322,32 @@ build_tree() { # build_tree VERSION TREENAME CLOSURE
     [[ $bad -eq 0 ]] || die "tree '$name' ($v): version-specific guard FAILED"
     echo "GUARD tree '$name' ($v): OK (${#VS_NAMES[@]} VS_NAMES, each exactly once at $v)"
 
-    step "tree '$name' ($v): build + harvest kmods (open, proprietary$([[ -z $skip_grid_driver ]] && echo , grid))"
-    build_open_kmods "$v" "$tree" "$closure"
-    build_proprietary_kmods "$v" "$tree" "$closure"
-    if [[ -z "$skip_grid_driver" ]]; then build_grid_kmods "$v" "$tree"; fi
+    # Guard: the header-only RPMs must register with exactly the boot-time flags, into a scratch rpmdb. If they
+    # don't, keep the full RPMs instead.
+    if [ "$NVIDIA_TREES_HEADER_RPMS" = 1 ]; then
+        local db n_in n_db=0; db=$(mktemp -d)
+        sudo rpm --dbpath "$db" --initdb
+        n_in=$(ls "$tree/.rpms" | wc -l)
+        if sudo rpm --dbpath "$db" -i --justdb --noscripts --nodeps --nodigest --nosignature "$tree/.rpms"/*.rpm \
+           && n_db=$(sudo rpm --dbpath "$db" -qa | wc -l) && [ "$n_db" = "$n_in" ]; then
+            echo "GUARD tree '$name': header-only RPMs register with rpm --justdb ($n_db of $n_in; .rpms is $(sudo du -sh "$tree/.rpms" | cut -f1))"
+        else
+            echo "WARNING tree '$name': header-only RPMs did not register ($n_db of $n_in); keeping the full RPMs" >&2
+            sudo rm -f "$tree/.rpms"/*.rpm
+            for rpm in "$B/dl/$closure"/*.rpm; do
+                base=$(basename "$rpm"); case "$base" in kmod-nvidia-*-dkms-*) continue;; esac
+                [[ -e "$SHARED/$base" ]] || sudo cp "$rpm" "$tree/.rpms/"
+            done
+        fi
+        sudo rm -rf "$db"
+    fi
+
+    local flavors="open proprietary grid"; [ "$name" = pb ] && flavors=$NVIDIA_PB_FLAVORS
+    [[ -n "$skip_grid_driver" ]] && flavors=${flavors//grid/}
+    step "tree '$name' ($v): build + harvest kmods ($flavors)"
+    if [[ " $flavors " == *" open "* ]]; then build_open_kmods "$v" "$tree" "$closure"; fi
+    if [[ " $flavors " == *" proprietary "* ]]; then build_proprietary_kmods "$v" "$tree" "$closure"; fi
+    if [[ " $flavors " == *" grid "* ]]; then build_grid_kmods "$v" "$tree"; fi
 
     # Record the branch's NEVRA manifest (the boot side registers exactly these with --justdb).
     (cd "$tree/.rpms" && for r in *.rpm; do
@@ -426,8 +470,16 @@ fi
 
 # -------- 7. sizes + cleanup --------
 step "7 sizes + cleanup"
-sudo du -sh "$NV"/* 2>/dev/null || true
-sudo du -sh "$NV" 2>/dev/null || true
+for t in "$NV"/lts "$NV"/pb; do
+    [ -d "$t" ] || continue
+    echo "SIZE $(basename "$t"): $(sudo du -sh "$t" | cut -f1)"
+    for p in .rpms usr/lib64 usr/lib/firmware usr/bin usr/share etc grid-extra flavors/open flavors/proprietary flavors/grid; do
+        [ -e "$t/$p" ] && echo "SIZE $(basename "$t")/$p: $(sudo du -sh "$t/$p" | cut -f1)"
+    done
+    echo "SIZE $(basename "$t") largest files:"
+    sudo find "$t" -type f -printf '%s %P\n' | sort -rn | head -15 | awk '{printf "SIZE   %7.1f MiB  %s\n", $1/1048576, $2}'
+done
+echo "SIZE total: $(sudo du -sh "$NV" | cut -f1)"
 sudo rm -f /etc/dkms/nvidia.conf
 sudo rm -rf "$B"
 echo "stage-nvidia-optionb: done"
