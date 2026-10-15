@@ -398,20 +398,25 @@ if [ "$LAYOUT" = copy ]; then
         sudo install -D -m0644 "$SRC/optionc-nvidia-package-register.service" /etc/systemd/system/nvidia-package-register.service
         sudo install -D -m0644 "$SRC/optionc-nvidia-override-late.service" /etc/systemd/system/nvidia-override-late.service
         sudo install -D -m0755 "$SRC/nvidia-override-late.sh" /usr/libexec/nvidia-optionb/nvidia-override-late
+        # The other tree is removed after the first boot instead of switching trees on an instance-type change,
+        # which ECS doesn't support. So no type-change hold.
+        sudo install -D -m0644 "$SRC/optionc-nvidia-tree-prune.service" /etc/systemd/system/nvidia-tree-prune.service
+        sudo install -D -m0755 "$SRC/nvidia-tree-prune.sh" /usr/libexec/nvidia-optionb/nvidia-tree-prune
+        sudo rm -f /etc/systemd/system/nvidia-type-change-hold.service /usr/libexec/nvidia-optionb/nvidia-type-change-hold
         sudo touch "$CONF/optionc-lean"
-        REGISTER_UNIT="nvidia-package-register.service nvidia-override-late.service"
-        echo "lean build: resolve and copy before cloud-init; package records after the driver is up"
+        REGISTER_UNIT="nvidia-package-register.service nvidia-override-late.service nvidia-tree-prune.service"
+        echo "lean build: resolve and copy before cloud-init; package records after the driver is up; unused tree pruned after first boot"
     fi
     sudo systemctl daemon-reload
     sudo systemctl enable nvidia-driver-resolve.service nvidia-setup.service nvidia-ldcache-update.service \
-        nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service \
-        nvidia-type-change-hold.service
-    [ -e "$CONF/optionc-lean" ] && sudo systemctl enable nvidia-override-late.service
+        nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service
+    if [ -e "$CONF/optionc-lean" ]; then sudo systemctl enable nvidia-override-late.service nvidia-tree-prune.service
+    else sudo systemctl enable nvidia-type-change-hold.service; HOLD_UNIT=nvidia-type-change-hold.service; fi
 
     # Same guard as Option B: moving resolve after cloud-init must not form an ordering cycle.
     verify_out=$(sudo systemd-analyze verify --man=no default.target nvidia-driver-resolve.service \
         nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service \
-        nvidia-setup.service nvidia-ldcache-update.service nvidia-type-change-hold.service $REGISTER_UNIT 2>&1 || true)
+        nvidia-setup.service nvidia-ldcache-update.service ${HOLD_UNIT:-} $REGISTER_UNIT 2>&1 || true)
     if grep -qi 'ordering cycle' <<<"$verify_out"; then
         echo "$verify_out" >&2
         die "Option C boot units form a systemd ordering cycle"

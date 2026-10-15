@@ -1,0 +1,19 @@
+# /etc/systemd/system/nvidia-tree-prune.service (Option C, lean build)
+# Removes the unused driver tree and flavors once the first boot's commit, package records and any customer
+# override are done. Nothing is ordered after it, and it runs at idle I/O priority, so it doesn't delay the driver,
+# Docker or ECS.
+[Unit]
+Description=Remove the NVIDIA driver trees this instance won't use (Option C, lean)
+After=nvidia-setup.service nvidia-package-register.service nvidia-override-late.service
+ConditionPathExists=/var/lib/nvidia-optionb/.driver-committed
+ConditionPathExists=!/var/lib/nvidia-optionb/.pruned
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/nvidia-optionb/nvidia-tree-prune
+IOSchedulingClass=idle
+Nice=19
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target

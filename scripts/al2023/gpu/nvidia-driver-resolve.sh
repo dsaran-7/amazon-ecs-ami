@@ -65,7 +65,9 @@ fi
 # drop the resolve marker so the normal path below runs; if it then picks a different tree or flavor, the old
 # tree is cleaned out of /usr, /lib/modules and the rpmdb before the new one is copied in.
 OLD_TREE=; OLD_FLAVOR=
-if [ "$LAYOUT" = copy ] && [ -L "$NV/current" ] && [ -e "$STATE/.resolved" ] && [ -s "$STATE/.resolved-itype" ]; then
+# The lean build skips this: ECS doesn't support changing a container instance's type ("Container instance type
+# changes are not supported."), and nvidia-tree-prune removes the other tree after the first boot.
+if [ "$LAYOUT" = copy ] && [ ! -e "$CONF/optionc-lean" ] && [ -L "$NV/current" ] && [ -e "$STATE/.resolved" ] && [ -s "$STATE/.resolved-itype" ]; then
   now=$(tr -d '[:space:]' </sys/devices/virtual/dmi/id/product_name 2>/dev/null || true)
   was=$(cat "$STATE/.resolved-itype")
   if [ -n "$now" ] && [ "$now" != "$was" ]; then
