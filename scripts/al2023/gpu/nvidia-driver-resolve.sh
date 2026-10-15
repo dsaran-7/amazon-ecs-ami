@@ -23,6 +23,20 @@ T0=$(date +%s%N)
 el() { echo $(( ($(date +%s%N) - T0) / 1000000 )); }
 log() { echo "[+$(el)ms] resolve: $*"; }
 die() { log "ERROR: $*"; exit 1; }
+# The build stores rarely used parts of the trees compressed (the whole PB tree, and the LTS proprietary and GRID
+# modules); unpack one the first time it's chosen. Unpacked into a temporary directory and renamed into place, so a
+# reset part-way through just unpacks again on the next boot.
+ensure_unpacked() { # ensure_unpacked DIR
+  local d=$1 tmp
+  [ -d "$d" ] && return 0
+  [ -f "$d.tar.zst" ] || return 0
+  tmp="$(dirname "$d")/.unpacking-$(basename "$d")"
+  rm -rf "$tmp"; mkdir -p "$tmp"
+  log "unpacking ${d#/opt/nvidia/} ($(du -h "$d.tar.zst" | cut -f1) compressed)"
+  zstd -dcq -T0 "$d.tar.zst" | tar -C "$tmp" -xf - --xattrs || die "unpacking $d failed"
+  mv "$tmp/$(basename "$d")" "$d" || die "unpacking $d: the archive has no $(basename "$d")"
+  rmdir "$tmp"; rm -f "$d.tar.zst"; sync
+}
 
 mkdir -p "$RUN" "$STATE"
 [ -r "$CONF/optionb-branches" ] || die "$CONF/optionb-branches missing"
@@ -107,6 +121,7 @@ if [ -n "$FAMILY" ] && [ -r "$CONF/optionb-pb-families" ]; then
 fi
 
 TREE="$NV/$branch"
+ensure_unpacked "$TREE"
 [ -d "$TREE" ] || die "resolved tree $TREE does not exist"
 
 # ---------- flavor by PCI subdevice (same rule as nvidia-kmod-load.sh) ----------
@@ -153,6 +168,7 @@ if [ "$LAYOUT" = copy ] && [ -r "$OVR" ]; then
     *) log "WARNING: ignoring invalid NVIDIA_DRIVER_BRANCH=$req" ;;
   esac
 fi
+ensure_unpacked "$TREE"; ensure_unpacked "$TREE/flavors/$flavor"
 [ -d "$TREE/flavors/$flavor" ] || die "tree $TREE has no $flavor flavor built"
 
 # ---------- after a type change: clean out the old tree if the choice changed ----------
