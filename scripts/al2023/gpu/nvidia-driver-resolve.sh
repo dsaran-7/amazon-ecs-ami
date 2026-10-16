@@ -33,6 +33,12 @@ ensure_unpacked() { # ensure_unpacked DIR
   tmp="$(dirname "$d")/.unpacking-$(basename "$d")"
   rm -rf "$tmp"; mkdir -p "$tmp"
   log "unpacking ${d#/opt/nvidia/} ($(du -h "$d.tar.zst" | cut -f1) compressed)"
+  # A volume restored from a snapshot loads blocks lazily, and one sequential reader fetches them one at a time.
+  # Reading the archive in 4 MiB chunks, 32 at once, first loads it far faster (the same read-ahead cut the
+  # 595 swap from 61 s to 28 s).
+  local chunks=$(( ($(stat -c %s "$d.tar.zst") + 4194303) / 4194304 ))
+  seq 0 $((chunks - 1)) | xargs -r -P32 -I{} dd if="$d.tar.zst" of=/dev/null bs=4M skip={} count=1 status=none || true
+  log "read ahead ${d#/opt/nvidia/} ($chunks chunks)"
   zstd -dcq -T0 "$d.tar.zst" | tar -C "$tmp" -xf - --xattrs || die "unpacking $d failed"
   mv "$tmp/$(basename "$d")" "$d" || die "unpacking $d: the archive has no $(basename "$d")"
   rmdir "$tmp"; rm -f "$d.tar.zst"; sync
