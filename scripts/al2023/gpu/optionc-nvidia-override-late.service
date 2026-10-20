@@ -6,7 +6,7 @@ Description=Apply the NVIDIA driver-branch override after cloud-init (Option C, 
 After=cloud-init.service nvidia-setup.service nvidia-package-register.service
 Before=nvidia-persistenced.service nvidia-fabricmanager.service nvidia-mps.service nvidia-gridd.service
 Before=set-nvidia-clocks.service nvidia-powerd.service nvidia-topologyd.service nvidia-cdi-refresh.service
-Before=nvidia-dcgm.service docker.service ecs.service cloud-final.service
+Before=nvidia-dcgm.service ecs.service cloud-final.service
 ConditionPathExists=/etc/ecs/nvidia-driver-select.override
 # First boot only: nvidia-tree-prune removes the other tree afterwards.
 ConditionPathExists=!/var/lib/nvidia-optionb/.pruned

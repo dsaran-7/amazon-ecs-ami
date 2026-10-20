@@ -6,7 +6,7 @@ After=nvidia-driver-resolve.service nvidia-usr-copy@bin.service nvidia-usr-copy@
 Wants=nvidia-usr-copy@bin.service nvidia-usr-copy@lib64.service nvidia-usr-copy@share.service
 Before=nvidia-persistenced.service nvidia-fabricmanager.service nvidia-mps.service
 Before=set-nvidia-clocks.service nvidia-powerd.service nvidia-gridd.service nvidia-topologyd.service
-Before=nvidia-cdi-refresh.service nvidia-dcgm.service docker.service ecs.service cloud-final.service
+Before=nvidia-cdi-refresh.service nvidia-dcgm.service ecs.service cloud-final.service
 ConditionPathExists=/opt/nvidia/current
 
 [Service]
