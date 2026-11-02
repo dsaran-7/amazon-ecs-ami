@@ -2,7 +2,8 @@
 #
 # One line per branch: <name> <flavors...>. The first line is the default branch, pinned by nvidia_driver_version_al2023
 # like the natively installed driver; every other branch is pinned by nvidia_driver_version_al2023_<name>, both in
-# NVIDIA_DRIVER_VERSION. Each branch becomes a tree under /opt/nvidia/<name> with kernel modules for the flavors listed.
-# Build only the flavors the GPUs that use the branch need: Blackwell and newer GPUs are open-only.
+# NVIDIA_DRIVER_VERSION. Each branch becomes a tree under /opt/nvidia/<name>. The default branch's kernel modules are
+# the native install's, one per flavor listed; every other branch's are built for the flavors listed, which can only be
+# open today (the open flavor is all Blackwell and newer GPUs need).
 lts open proprietary grid
 pb open

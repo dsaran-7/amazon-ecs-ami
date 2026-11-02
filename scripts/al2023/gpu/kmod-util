@@ -22,6 +22,11 @@ fi
 # Custom directory for storing DKMS module archives
 # This path is used to store compressed kernel module tarballs that can be loaded on demand
 DKMS_ARCHIVE_DIR=/var/lib/dkms-archive
+# With the per-version driver trees, an instance that resolved to a non-default branch loads that branch's archives
+BRANCH=$(cat /run/nvidia-driver-trees/branch 2>/dev/null || true)
+if [[ -n $BRANCH && -d $DKMS_ARCHIVE_DIR/branches/$BRANCH ]]; then
+  DKMS_ARCHIVE_DIR=$DKMS_ARCHIVE_DIR/branches/$BRANCH
+fi
 
 LOCK_FILE=/var/lock/kmod-util.lock
 

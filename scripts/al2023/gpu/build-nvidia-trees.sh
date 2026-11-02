@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build a per-version NVIDIA driver tree for each branch in nvidia-branches, under /opt/nvidia/<branch>.
 #
-# Runs at build time only when nvidia_driver_trees_al2023 is on (off by default). So far it downloads and checks each
-# branch's packages and removes them again. Nothing reads the trees yet: the native driver still runs the AMI.
+# Runs at build time only when nvidia_driver_trees_al2023 is on (off by default). So far it downloads, checks and
+# unpacks each branch's packages and archives the non-default branches' kernel modules. Nothing uses them at boot yet.
 set -Eeuo pipefail
 
 if [[ ${AMI_TYPE:-} != "al2023gpu" || ${NVIDIA_DRIVER_TREES:-false} != "true" ]]; then
@@ -123,6 +123,43 @@ download_branch() { # download_branch NAME
 for name in "${NAMES[@]}"; do
     step "download branch $name (${VERSION[$name]})"
     download_branch "$name"
+done
+
+NV=/opt/nvidia
+K=$(uname -r)
+command -v cpio >/dev/null || die "cpio is not installed"
+
+# -------- one tree per branch --------
+# Each branch's packages are unpacked, not installed, into its tree under /opt/nvidia, because one host can't install
+# two versions of the same package.
+for name in "${NAMES[@]}"; do
+    step "unpack branch $name into $NV/$name"
+    sudo mkdir -p "$NV/$name"
+    for rpm in "$B/dl/$name"/*.rpm; do
+        rpm2cpio "$rpm" | (cd "$NV/$name" && sudo cpio -idmu --quiet)
+    done
+    echo "branch $name: tree is $(sudo du -sh "$NV/$name" | cut -f1)"
+done
+
+# -------- kernel modules of the non-default branches --------
+# The default branch's modules are the native install's, archived in /var/lib/dkms-archive. Every other branch's are
+# built in a separate DKMS tree and archived the same way under /var/lib/dkms-archive/branches/<branch>, where
+# kmod-util load finds them on an instance that resolved to that branch.
+for name in "${NAMES[@]:1}"; do
+    v=${VERSION[$name]}
+    for flavor in ${FLAVORS[$name]}; do
+        [[ $flavor == open ]] || die "branch $name: only the open flavor is built for a non-default branch"
+        step "branch $name: build and archive the open kernel module"
+        src=$B/src/$name dk=$B/dkms/$name
+        sudo mkdir -p "$src" "$dk"
+        rpm2cpio "$B/kmod/$name/kmod-nvidia-open-dkms-$v"-*.rpm | (cd "$src" && sudo cpio -idmu --quiet)
+        sudo dkms add -m nvidia -v "$v" --sourcetree "$src/usr/src" --dkmstree "$dk"
+        sudo dkms build -m nvidia -v "$v" -k "$K" --sourcetree "$src/usr/src" --dkmstree "$dk"
+        sudo dkms mktarball -m nvidia -v "$v" -k "$K" --sourcetree "$src/usr/src" --dkmstree "$dk"
+        sudo mkdir -p "/var/lib/dkms-archive/branches/$name/nvidia"
+        sudo cp "$dk/nvidia/$v/tarball"/*.tar.gz "/var/lib/dkms-archive/branches/$name/nvidia/"
+        echo "branch $name: archived the open module in /var/lib/dkms-archive/branches/$name/nvidia"
+    done
 done
 
 sudo rm -rf "$B"
