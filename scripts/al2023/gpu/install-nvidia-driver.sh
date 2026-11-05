@@ -201,6 +201,9 @@ if [[ ${NVIDIA_DRIVER_TREES:-false} == "true" ]]; then
   for branch in "${NAMES[@]}"; do
     download_branch_packages "$branch" "${VERSION_SPECIFIC_PACKAGES[@]}"
   done
+  for branch in "${NAMES[@]}"; do
+    build_branch_modules "$branch" "$RUNNING_KERNEL" "$skip_grid_driver"
+  done
   sudo rm -rf "$TREES_BUILD_DIR"
 fi
 
